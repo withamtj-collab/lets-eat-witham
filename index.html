@@ -1,0 +1,740 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Witham Dinners</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<style>
+:root{
+  --bg:#F6F7F3; --surface:#FFFFFF; --ink:#1E2722; --muted:#5D6A62; --line:#D9DED6;
+  --herb:#2E6A4E; --herb-ink:#FFFFFF; --herb-soft:#E3EFE7;
+  --saffron:#C98512; --saffron-soft:#FBEFD6; --tomato:#B8392F;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#121714; --surface:#1B221E; --ink:#E9EEE9; --muted:#9BA89F; --line:#2E3832;
+    --herb:#7FC4A0; --herb-ink:#0F1A14; --herb-soft:#1F3328;
+    --saffron:#F0B95A; --saffron-soft:#3A2F17; --tomato:#F08A80;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#121714; --surface:#1B221E; --ink:#E9EEE9; --muted:#9BA89F; --line:#2E3832;
+  --herb:#7FC4A0; --herb-ink:#0F1A14; --herb-soft:#1F3328;
+  --saffron:#F0B95A; --saffron-soft:#3A2F17; --tomato:#F08A80;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font:400 17px/1.5 "Atkinson Hyperlegible", system-ui, -apple-system, "Segoe UI", sans-serif;
+  padding:env(safe-area-inset-top,0px) 0 env(safe-area-inset-bottom,0px);
+}
+h1,h2,h3,.brand,.daynum{font-family:"Bricolage Grotesque", "Atkinson Hyperlegible", system-ui, sans-serif}
+h1{font-size:2.4rem; line-height:1.05; font-weight:800; margin:0 0 .5rem}
+h2{font-size:1.45rem; line-height:1.2; font-weight:800; margin:0 0 .35rem}
+h3{font-size:1.1rem; font-weight:600; margin:0}
+p{margin:0}
+a{color:var(--herb)}
+button,input,select,textarea{font:inherit; color:inherit}
+:focus-visible{outline:3px solid var(--saffron); outline-offset:2px}
+
+.top{display:flex; align-items:center; justify-content:space-between; gap:1rem; padding:1rem 1.25rem .5rem; max-width:860px; margin:0 auto}
+.brand{font-weight:800; font-size:1.3rem}
+.who{color:var(--muted); font-size:.95rem; white-space:nowrap}
+.tabs{
+  position:sticky; top:env(safe-area-inset-top,0px); z-index:5; background:var(--bg);
+  display:flex; gap:.25rem; overflow-x:auto; padding:.5rem 1.25rem; max-width:860px; margin:0 auto;
+  border-bottom:1px solid var(--line);
+}
+body::before{content:""; position:fixed; inset:0 0 auto; height:env(safe-area-inset-top,0px); z-index:10; background:var(--bg)}
+.tabs button{border:0; background:none; padding:.5rem .9rem; border-radius:999px; cursor:pointer; color:var(--muted); font-weight:700; white-space:nowrap}
+.tabs button.on{background:var(--ink); color:var(--bg)}
+.view{max-width:860px; margin:0 auto; padding:1.25rem 1.25rem 4rem; display:flex; flex-direction:column; gap:2rem}
+
+.stack{display:flex; flex-direction:column; gap:.85rem}
+.row{display:flex; gap:.75rem; flex-wrap:wrap}
+.row > *{flex:1 1 140px}
+label{display:flex; flex-direction:column; gap:.3rem; font-weight:700; font-size:.95rem}
+input[type=text],input[type=email],input[type=password],input[type=number],input[type=url],input:not([type]),select,textarea{
+  width:100%; padding:.6rem .7rem; border:1.5px solid var(--line); border-radius:10px; background:var(--surface); font-weight:400; font-size:1rem;
+}
+textarea{min-height:7rem; resize:vertical}
+.muted{color:var(--muted)}
+.small{font-size:.9rem}
+
+.btn{border:1.5px solid var(--ink); background:transparent; padding:.65rem 1.1rem; border-radius:10px; font-weight:700; cursor:pointer}
+.btn.primary{background:var(--herb); border-color:var(--herb); color:var(--herb-ink)}
+.btn.danger{border-color:var(--tomato); color:var(--tomato)}
+.btn:disabled{opacity:.5; cursor:default}
+.link{border:0; background:none; padding:0; color:var(--herb); font-weight:700; cursor:pointer; text-decoration:underline; text-underline-offset:3px}
+
+.group{border:0; padding:0; margin:0; display:flex; flex-direction:column; gap:.4rem}
+.group legend{font-family:"Bricolage Grotesque", sans-serif; font-weight:800; font-size:1.2rem; margin-bottom:.4rem}
+.choice{flex-direction:row; align-items:flex-start; gap:.7rem; font-weight:400; padding:.65rem .8rem; border:1.5px solid var(--line); border-radius:12px; background:var(--surface); cursor:pointer}
+.choice:has(input:checked){border-color:var(--herb); background:var(--herb-soft)}
+.choice input[type=radio]{margin-top:.3rem; accent-color:var(--herb); width:1.1rem; height:1.1rem; flex:none}
+.choice > span{display:flex; flex-direction:column; gap:.2rem; flex:1}
+.choice input[type=text]{margin-top:.3rem}
+.tag{display:inline-block; font-size:.78rem; font-weight:700; padding:.05rem .5rem; border-radius:999px; background:var(--line); color:var(--ink); vertical-align:middle}
+.tag.quick{background:var(--saffron-soft); color:var(--saffron)}
+.macros{font-size:.88rem; color:var(--muted)}
+
+.list{list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:.5rem}
+.list li{padding:.6rem .8rem; background:var(--surface); border:1px solid var(--line); border-radius:10px}
+
+/* The week: one big day number per row is the page's signature */
+.week{display:flex; flex-direction:column; gap:.6rem}
+.day{display:grid; grid-template-columns:4.2rem 1fr; gap:.9rem; align-items:start; padding:.85rem; background:var(--surface); border:1px solid var(--line); border-radius:14px}
+.day.tight{border-left:5px solid var(--saffron)}
+.day.away{border-left:5px solid var(--muted)}
+.daynum{font-weight:800; font-size:2.4rem; line-height:.9; text-align:center}
+.daynum small{display:block; font-family:"Atkinson Hyperlegible", sans-serif; font-size:.8rem; font-weight:700; color:var(--muted); margin-top:.35rem}
+.day .body{display:flex; flex-direction:column; gap:.5rem; min-width:0}
+.checks{display:flex; flex-wrap:wrap; gap:.35rem .9rem; font-weight:400}
+.checks label{flex-direction:row; align-items:center; gap:.35rem; font-weight:400}
+
+.tally{width:100%; border-collapse:collapse}
+.tally td{padding:.45rem 0; border-bottom:1px solid var(--line); vertical-align:top}
+.tally td.n{width:2.5rem; font-family:"Bricolage Grotesque", sans-serif; font-weight:800; font-size:1.3rem}
+.scroll{overflow-x:auto}
+
+.recipe{background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:.75rem .9rem}
+.recipe summary{cursor:pointer; list-style:none; display:flex; justify-content:space-between; gap:.6rem; align-items:baseline}
+.recipe summary::-webkit-details-marker{display:none}
+.recipe .inner{margin-top:.7rem; display:flex; flex-direction:column; gap:.6rem}
+.recipe ul{margin:0; padding-left:1.2rem}
+.ing{display:grid; grid-template-columns:4.5rem 4.5rem 1fr 7rem auto; gap:.4rem; align-items:center}
+@media (max-width:560px){ .ing{grid-template-columns:1fr 1fr; } .ing .name{grid-column:1 / -1} }
+
+.tag.fit{background:var(--herb-soft); color:var(--herb)}
+.daystrip{display:grid; grid-template-columns:repeat(7, 1fr); gap:.35rem}
+.dchip{display:flex; flex-direction:column; align-items:center; padding:.45rem .2rem; border-radius:10px; background:var(--surface); border:1px solid var(--line); font-size:.85rem}
+.dchip span{color:var(--muted)}
+.dchip.tight{background:var(--saffron-soft); border-color:var(--saffron)}
+.dchip.tight span{color:var(--ink)}
+.dchip.away{background:var(--line)}
+.sched{padding:.55rem .7rem; border-radius:10px; background:var(--bg); display:flex; flex-direction:column; gap:.3rem}
+.events{list-style:none; margin:0; padding:0; font-size:.9rem; display:flex; flex-direction:column; gap:.15rem}
+.list li.tight{border-left:4px solid var(--saffron)}
+.list li.away{border-left:4px solid var(--muted)}
+.empty{padding:2rem 0; display:flex; flex-direction:column; gap:.8rem; align-items:flex-start}
+.login{max-width:420px; margin:12vh auto 0; padding:0 1.25rem; display:flex; flex-direction:column; gap:1.5rem}
+.notice{padding:.8rem 1rem; border-radius:12px; background:var(--saffron-soft); color:var(--ink)}
+
+#toast{position:fixed; left:50%; bottom:calc(1.25rem + env(safe-area-inset-bottom,0px)); transform:translateX(-50%); background:var(--ink); color:var(--bg); padding:.7rem 1.1rem; border-radius:12px; font-weight:700; max-width:90vw; opacity:0; pointer-events:none; transition:opacity .2s}
+#toast.show{opacity:1}
+#toast.bad{background:var(--tomato); color:#fff}
+@media (prefers-reduced-motion: reduce){ #toast{transition:none} }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="toast" role="status" aria-live="polite"></div>
+<script>
+/* ===== Settings: paste these from Supabase → Project Settings → API ===== */
+const SUPABASE_URL = 'https://xoanixovtmtmhiwohbwv.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_41jv7jTH3AYP_U3GNk2Ovg_3zlnrJpI';
+const QUICK_MINUTES = 30;
+
+/* ===== Basics ===== */
+const $ = s => document.querySelector(s);
+const $$ = s => [...document.querySelectorAll(s)];
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const state = { user:null, me:null, profiles:[], tab:'vote', planWeek:null, resultsWeek:null };
+const isAdmin = () => state.me?.role === 'admin';
+const nameOf = id => state.profiles.find(p => p.id === id)?.name || 'Someone';
+
+const CATS = [['dine_in','Cook at home'], ['takeout','Takeout'], ['restaurant','Eat out']];
+const REQ = { craving:'Craving', celebration:'Celebration', guest:'Guest coming', dietary:'Dietary need' };
+const SECTIONS = ['produce','meat','dairy','bakery','pantry','frozen','other'];
+const FLAGS = { home:'Everyone home', tight:'Busy night (quick meal)', away:'Not everyone home' };
+
+let toastTimer;
+function toast(msg, bad){
+  const t = $('#toast'); t.textContent = msg; t.className = 'show' + (bad ? ' bad' : '');
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.className = '', 3200);
+}
+async function q(req){
+  const { data, error } = await req;
+  if (error){ toast(error.message, true); throw error; }
+  return data;
+}
+
+/* Dates are kept as local YYYY-MM-DD strings */
+const ymd = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+const parseYmd = s => { const [y,m,d] = s.split('-').map(Number); return new Date(y, m-1, d); };
+const addDays = (s, n) => { const d = parseYmd(s); d.setDate(d.getDate() + n); return ymd(d); };
+const weekDates = start => Array.from({length:7}, (_, i) => addDays(start, i));
+const dayLabel = s => parseYmd(s).toLocaleDateString(undefined, { weekday:'short', month:'short', day:'numeric' });
+
+function macros(r){
+  if (!r || (r.protein_g == null && r.carbs_g == null && r.fat_g == null)) return '';
+  const v = x => x == null ? '?' : Math.round(x);
+  return `<span class="macros">${v(r.protein_g)}g protein, ${v(r.carbs_g)}g carbs, ${v(r.fat_g)}g fat${r.calories ? `, ${Math.round(r.calories)} cal` : ''} per serving${r.macros_estimated ? ' (estimated)' : ''}</span>`;
+}
+const timeText = r => r?.total_min ? `${r.total_min} min${r.time_estimated ? ' (est.)' : ''}` : '';
+const quickTag = r => r?.is_quick && r?.total_min ? ' <span class="tag quick">Quick</span>' : '';
+
+/* ===== Family calendar (6-8 PM each night), read by the Netlify Function ===== */
+async function fetchSchedule(start){
+  try {
+    const { data:{ session } } = await sb.auth.getSession();
+    const r = await fetch(`/.netlify/functions/calendar?start=${start}`, { headers:{ Authorization:`Bearer ${session.access_token}` } });
+    return r.ok ? await r.json() : null;
+  } catch { return null; }
+}
+const fmtTime = iso => new Date(iso).toLocaleTimeString(undefined, { hour:'numeric', minute:'2-digit' });
+const FLAG_SHORT = { home:'Open', tight:'Busy', away:'Away' };
+function outlook(days){
+  const busy = days.filter(d => d.flag !== 'home').length;
+  if (busy >= 3) return { kind:'busy', text:`Busy week: ${busy} of 7 evenings have something going on, so quick and easy meals are a good pick.` };
+  if (busy <= 1) return { kind:'easy', text:`Light week: ${7 - busy} open evenings. A good week to eat out.` };
+  return { kind:'normal', text:`${busy} busy evenings this week.` };
+}
+function weekStrip(days, look){
+  return `<section class="stack"><p class="notice">${esc(look.text)}</p>
+    <div class="daystrip">${days.map(d => `<div class="dchip ${d.flag}"><b>${parseYmd(d.date).toLocaleDateString(undefined, { weekday:'short' })}</b><span>${FLAG_SHORT[d.flag]}</span></div>`).join('')}</div></section>`;
+}
+function dayLine(s){
+  const timed = s.events.filter(e => !e.allDay).map(e => `${fmtTime(e.start)} ${e.title}`);
+  const what = timed.length ? ` (${timed.join('; ')})` : '';
+  if (s.away.length) return `${esc(s.away.join(', '))} out${esc(what)}`;
+  if (s.untagged) return `Something on, no name tag${esc(what)}`;
+  return 'Everyone free';
+}
+function schedHtml(s, saved){
+  if (!s) return '';
+  const when = e => e.allDay ? 'All day' : `${fmtTime(e.start)}–${fmtTime(e.end)}`;
+  const who = s.away.length
+    ? `<b>Out at dinner:</b> ${esc(s.away.join(', '))}. <b>Home:</b> ${esc(s.home.join(', ') || 'nobody')}.`
+    : s.untagged ? '<b>Something’s on at dinner</b> (no name tag on the event).' : '<b>Everyone’s free at dinner.</b>';
+  return `<div class="sched"><p class="small">${who}</p>
+    ${s.events.length ? `<ul class="events">${s.events.map(e => `<li><span class="muted">${when(e)}</span> ${esc(e.title)}</li>`).join('')}</ul>` : ''}
+    ${saved && saved.calendar_flag !== s.flag ? `<p class="small muted">Calendar suggests: ${FLAGS[s.flag]}</p>` : ''}</div>`;
+}
+
+/* ===== Start up ===== */
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+if (SUPABASE_ANON_KEY.includes('YOUR-ANON-KEY')){
+  $('#app').innerHTML = `<main class="login"><h1>Almost there</h1>
+    <p>Open <b>index.html</b> and paste your Supabase anon key into the line near the top of the script.</p></main>`;
+} else {
+  sb.auth.onAuthStateChange((event, session) => {
+    if (!['INITIAL_SESSION','SIGNED_IN','SIGNED_OUT'].includes(event)) return;
+    if (event === 'SIGNED_IN' && session?.user?.id === state.user?.id) return;
+    setTimeout(() => start(session), 0);
+  });
+}
+
+async function start(session){
+  state.user = session?.user || null;
+  if (!state.user) return renderLogin();
+  state.profiles = await q(sb.from('profiles').select('*').order('name'));
+  state.me = state.profiles.find(p => p.id === state.user.id);
+  renderShell();
+}
+
+function renderLogin(){
+  $('#app').innerHTML = `<main class="login">
+    <div><h1>What’s for dinner?</h1><p class="muted">Sign in to vote for this week’s dinners.</p></div>
+    <form id="loginForm" class="stack">
+      <label>Email<input type="email" name="email" required autocomplete="email"></label>
+      <label>Password<input type="password" name="password" required autocomplete="current-password"></label>
+      <button class="btn primary" type="submit">Sign in</button>
+    </form></main>`;
+  $('#loginForm').onsubmit = async e => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    const { error } = await sb.auth.signInWithPassword({ email:f.get('email'), password:f.get('password') });
+    if (error) toast('Sign-in failed. Check the email and password.', true);
+  };
+}
+
+const TABS = [
+  { id:'vote', label:'Vote' },
+  { id:'plan', label:'The plan' },
+  { id:'recipes', label:'Recipes' },
+  { id:'results', label:'Results', admin:true },
+];
+
+function renderShell(){
+  if (!state.me){
+    $('#app').innerHTML = `<main class="login"><p>This login isn’t linked to a family member yet. Check the profiles table in Supabase.</p>
+      <button class="btn" id="out">Sign out</button></main>`;
+    $('#out').onclick = () => sb.auth.signOut();
+    return;
+  }
+  $('#app').innerHTML = `
+    <header class="top"><div class="brand">Witham dinners</div>
+      <div class="who">${esc(state.me.name)} · <button class="link" id="signOut">Sign out</button></div></header>
+    <nav class="tabs">${TABS.filter(t => !t.admin || isAdmin()).map(t =>
+      `<button data-tab="${t.id}" class="${state.tab === t.id ? 'on' : ''}">${t.label}</button>`).join('')}</nav>
+    <main id="view" class="view"><p class="muted">Loading…</p></main>`;
+  $('#signOut').onclick = () => sb.auth.signOut();
+  $$('.tabs button').forEach(b => b.onclick = () => { state.tab = b.dataset.tab; renderShell(); });
+  ({ vote:viewVote, plan:viewPlan, recipes:viewRecipes, results:viewResults })[state.tab]().catch(console.error);
+}
+
+async function openWeek(){
+  const rows = await q(sb.from('weeks').select('*').eq('status','open')
+    .gt('closes_at', new Date().toISOString()).order('start_date', { ascending:false }).limit(1));
+  return rows[0];
+}
+const recentWeeks = () => q(sb.from('weeks').select('*').order('start_date', { ascending:false }).limit(12));
+
+async function openNextWeek(){
+  const t = new Date();
+  let mon = new Date(t.getFullYear(), t.getMonth(), t.getDate() + (((8 - t.getDay()) % 7) || 7));
+  let close = new Date(mon.getFullYear(), mon.getMonth(), mon.getDate() - 1, 17, 0);
+  if (close <= t){ mon.setDate(mon.getDate() + 7); close.setDate(close.getDate() + 7); }
+  await q(sb.from('weeks').insert({ start_date:ymd(mon), closes_at:close.toISOString() }));
+  toast('Poll opened.');
+  renderShell();
+}
+
+/* ===== Vote ===== */
+async function viewVote(){
+  const v = $('#view');
+  const week = await openWeek();
+  if (!week){
+    v.innerHTML = `<section class="empty"><h2>No poll open right now</h2>
+      <p class="muted">The next poll opens Friday and closes Sunday at 5 PM.</p>
+      ${isAdmin() ? '<button class="btn primary" id="newWeek">Open next week’s poll</button>' : ''}</section>`;
+    if (isAdmin()) $('#newWeek').onclick = openNextWeek;
+    return;
+  }
+  const [options, mine, myReqs, sched] = await Promise.all([
+    q(sb.from('options').select('*, recipes(*)').order('name')),
+    q(sb.from('votes').select('*').eq('week_id', week.id).eq('user_id', state.user.id)),
+    q(sb.from('requests').select('*').eq('week_id', week.id).eq('user_id', state.user.id).order('id')),
+    fetchSchedule(week.start_date),
+  ]);
+  const closes = new Date(week.closes_at).toLocaleString(undefined, { weekday:'long', hour:'numeric', minute:'2-digit' });
+  const look = sched?.days ? outlook(sched.days) : null;
+  const fits = o => look?.kind === 'busy' ? (o.category === 'takeout' || (o.category === 'dine_in' && !!(o.recipes?.is_quick && o.recipes?.total_min)))
+                  : look?.kind === 'easy' ? o.category === 'restaurant' : false;
+
+  const group = ([cat, label]) => {
+    const vote = mine.find(x => x.category === cat);
+    const opts = options.filter(o => o.category === cat)
+      .sort((a, b) => (fits(b) - fits(a)) || ((b.recipes?.priority ? 1 : 0) - (a.recipes?.priority ? 1 : 0)));
+    return `<fieldset class="group"><legend>${label}</legend>
+      ${opts.map(o => `<label class="choice"><input type="radio" name="${cat}" value="${o.id}" ${vote?.option_id === o.id ? 'checked' : ''}>
+        <span><b>${esc(o.name)}${quickTag(o.recipes)}${o.recipes?.priority ? ' <span class="tag">Favorite</span>' : ''}${fits(o) ? ' <span class="tag fit">Good fit this week</span>' : ''}</b>${macros(o.recipes)}</span></label>`).join('')}
+      <label class="choice"><input type="radio" name="${cat}" value="write" ${vote?.write_in ? 'checked' : ''}>
+        <span><b>Something else</b><input type="text" name="${cat}_write" maxlength="80" placeholder="Type your idea" value="${esc(vote?.write_in || '')}"></span></label>
+      <label class="choice"><input type="radio" name="${cat}" value="" ${!vote ? 'checked' : ''}><span>No pick</span></label>
+    </fieldset>`;
+  };
+
+  v.innerHTML = `
+    <section><h2>Dinners for the week of ${dayLabel(week.start_date)}</h2>
+      <p class="muted">Pick up to one in each group. You can change your picks until ${closes}. Only Mom and Dad see the votes.</p></section>
+    ${look ? weekStrip(sched.days, look) : ''}
+    <form id="voteForm" class="stack">${CATS.map(group).join('')}
+      <button class="btn primary" type="submit">Save my picks</button></form>
+    <section class="stack"><div><h2>Special requests</h2><p class="muted">A birthday, a guest coming, or a craving? Add it here.</p></div>
+      ${myReqs.length ? `<ul class="list">${myReqs.map(r => `<li>${r.day ? `<b>${dayLabel(r.day)}:</b> ` : ''}${esc(r.text)}
+        <span class="tag">${REQ[r.type] || 'Request'}</span> <button class="link" data-del="${r.id}">Remove</button></li>`).join('')}</ul>` : ''}
+      <form id="reqForm" class="stack">
+        <div class="row">
+          <label>Day<select name="day"><option value="">Any day</option>${weekDates(week.start_date).map(d => `<option value="${d}">${dayLabel(d)}</option>`).join('')}</select></label>
+          <label>Kind<select name="type">${Object.entries(REQ).map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select></label>
+        </div>
+        <label>Request<input type="text" name="text" required maxlength="200" placeholder="Tacos for my birthday, please"></label>
+        <div><button class="btn" type="submit">Add request</button></div>
+      </form></section>`;
+
+  $$('#voteForm input[type=text]').forEach(inp => inp.addEventListener('input', () => {
+    inp.closest('.choice').querySelector('input[type=radio]').checked = true;
+  }));
+  $('#voteForm').onsubmit = async e => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    for (const [cat] of CATS){
+      const val = f.get(cat), write = (f.get(cat + '_write') || '').trim();
+      if (!val || (val === 'write' && !write)){
+        await q(sb.from('votes').delete().eq('week_id', week.id).eq('user_id', state.user.id).eq('category', cat));
+        continue;
+      }
+      await q(sb.from('votes').upsert({
+        week_id:week.id, user_id:state.user.id, category:cat,
+        option_id: val === 'write' ? null : Number(val), write_in: val === 'write' ? write : null,
+      }, { onConflict:'week_id,user_id,category' }));
+    }
+    toast('Picks saved.');
+  };
+  $('#reqForm').onsubmit = async e => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    await q(sb.from('requests').insert({ week_id:week.id, user_id:state.user.id, day:f.get('day') || null, type:f.get('type'), text:f.get('text').trim() }));
+    toast('Request added.');
+    viewVote();
+  };
+  $$('[data-del]').forEach(b => b.onclick = async () => {
+    await q(sb.from('requests').delete().eq('id', b.dataset.del));
+    viewVote();
+  });
+}
+
+/* ===== Results (admins) ===== */
+async function viewResults(){
+  const v = $('#view');
+  const weeks = await recentWeeks();
+  if (!weeks.length){
+    v.innerHTML = `<section class="empty"><h2>No polls yet</h2><button class="btn primary" id="newWeek">Open next week’s poll</button></section>`;
+    $('#newWeek').onclick = openNextWeek;
+    return;
+  }
+  const week = weeks.find(w => w.id === state.resultsWeek) || weeks[0];
+  const [votes, reqs, options, sched] = await Promise.all([
+    q(sb.from('votes').select('*').eq('week_id', week.id)),
+    q(sb.from('requests').select('*').eq('week_id', week.id).order('day')),
+    q(sb.from('options').select('*')),
+    fetchSchedule(week.start_date),
+  ]);
+  const voters = new Set(votes.map(x => x.user_id));
+  const missing = state.profiles.filter(p => !voters.has(p.id)).map(p => p.name);
+  const isOpen = week.status === 'open' && new Date(week.closes_at) > new Date();
+
+  const table = ([cat, label]) => {
+    const groups = {};
+    votes.filter(x => x.category === cat).forEach(x => {
+      const key = x.option_id ? 'o' + x.option_id : 'w' + x.write_in.toLowerCase();
+      const name = x.option_id ? (options.find(o => o.id === x.option_id)?.name || 'Removed option') : x.write_in;
+      (groups[key] ||= { name, write:!x.option_id, people:[] }).people.push(nameOf(x.user_id));
+    });
+    const rows = Object.values(groups).sort((a, b) => b.people.length - a.people.length);
+    return `<section class="stack"><h3>${label}</h3>${rows.length ? `<table class="tally"><tbody>${rows.map(r => `<tr><td class="n">${r.people.length}</td>
+      <td><b>${esc(r.name)}</b>${r.write ? ' <span class="tag">Write-in</span>' : ''}<br><span class="small muted">${esc(r.people.join(', '))}</span>
+      ${r.write ? `<br><button class="link small" data-promote="${cat}" data-name="${esc(r.name)}">Add to the options list</button>` : ''}</td></tr>`).join('')}</tbody></table>`
+      : '<p class="muted">No picks yet.</p>'}</section>`;
+  };
+
+  v.innerHTML = `
+    <section class="stack">
+      <label>Week<select id="weekPick">${weeks.map(w => `<option value="${w.id}" ${w.id === week.id ? 'selected' : ''}>Week of ${dayLabel(w.start_date)} (${w.status})</option>`).join('')}</select></label>
+      <p class="muted">${voters.size} of ${state.profiles.length} have voted${missing.length ? `. Still waiting on ${esc(missing.join(', '))}.` : '.'}</p>
+      ${isOpen ? '<div><button class="btn" id="closePoll">Close the poll now</button></div>' : ''}
+    </section>
+    ${sched?.days ? `<section class="stack"><h3>Evenings this week, 6–8 PM</h3><p class="small muted">${esc(outlook(sched.days).text)}</p>
+      <ul class="list small">${sched.days.map(s => `<li class="${s.flag}"><b>${dayLabel(s.date)}:</b> ${dayLine(s)}</li>`).join('')}</ul></section>`
+      : '<p class="notice small">The family calendar didn’t load, so evenings aren’t shown.</p>'}
+    ${CATS.map(table).join('')}
+    <section class="stack"><h3>Special requests</h3>${reqs.length ? `<ul class="list">${reqs.map(r => `<li><b>${esc(nameOf(r.user_id))}</b>${r.day ? `, ${dayLabel(r.day)}` : ''}: ${esc(r.text)} <span class="tag">${REQ[r.type] || 'Request'}</span></li>`).join('')}</ul>` : '<p class="muted">None this week.</p>'}</section>
+    <div><button class="btn primary" id="toPlan">Plan this week</button></div>`;
+
+  $('#weekPick').onchange = e => { state.resultsWeek = Number(e.target.value); viewResults(); };
+  if (isOpen) $('#closePoll').onclick = async () => { await q(sb.from('weeks').update({ status:'closed' }).eq('id', week.id)); toast('Poll closed.'); viewResults(); };
+  $('#toPlan').onclick = () => { state.planWeek = week.id; state.tab = 'plan'; renderShell(); };
+  $$('[data-promote]').forEach(b => b.onclick = async () => {
+    await q(sb.from('options').insert({ name:b.dataset.name, category:b.dataset.promote }));
+    toast(`${b.dataset.name} added to the options list.`);
+    b.remove();
+  });
+}
+
+/* ===== The plan ===== */
+async function viewPlan(){
+  const v = $('#view');
+  let weeks = await recentWeeks();
+  if (!isAdmin()) weeks = weeks.filter(w => w.status === 'finalized');
+  if (!weeks.length){
+    v.innerHTML = `<section class="empty"><h2>No plan yet</h2><p class="muted">${isAdmin() ? 'Open a poll from the Vote tab first.' : 'Mom and Dad will post the week’s dinners after voting closes on Sunday.'}</p></section>`;
+    return;
+  }
+  const week = weeks.find(w => w.id === state.planWeek) || weeks[0];
+  const [days, recipes, options] = await Promise.all([
+    q(sb.from('plan_days').select('*, meal_credits(user_id)').eq('week_id', week.id)),
+    q(sb.from('recipes').select('*').order('name')),
+    q(sb.from('options').select('*').neq('category', 'dine_in').order('name')),
+  ]);
+  const byDate = Object.fromEntries(days.map(d => [d.date, d]));
+  const recipeOf = d => recipes.find(r => r.id === d?.recipe_id);
+  const mealName = d => {
+    if (!d?.meal_kind) return null;
+    if (d.meal_kind === 'recipe') return recipeOf(d)?.name;
+    if (d.meal_kind === 'leftovers') return 'Leftovers';
+    if (d.meal_kind === 'fend') return 'Fend for yourself';
+    const o = options.find(o => o.id === d.option_id);
+    return (d.meal_kind === 'takeout' ? 'Takeout: ' : 'Eating out: ') + (o?.name || '');
+  };
+  const dateNum = s => parseYmd(s).getDate();
+  const weekday = s => parseYmd(s).toLocaleDateString(undefined, { weekday:'short' });
+
+  const homeMeals = weekDates(week.start_date).map(d => recipeOf(byDate[d])).filter(r => r && r.protein_g != null);
+  const avg = k => Math.round(homeMeals.reduce((s, r) => s + (Number(r[k]) || 0), 0) / homeMeals.length);
+  const weekMacros = homeMeals.length ? `<p class="macros">Home-cooked average: ${avg('protein_g')}g protein, ${avg('carbs_g')}g carbs, ${avg('fat_g')}g fat per serving.</p>` : '';
+
+  const picker = `<label>Week<select id="weekPick">${weeks.map(w => `<option value="${w.id}" ${w.id === week.id ? 'selected' : ''}>Week of ${dayLabel(w.start_date)}${isAdmin() ? ` (${w.status})` : ''}</option>`).join('')}</select></label>`;
+
+  if (!isAdmin()){
+    v.innerHTML = `<section class="stack">${picker}${weekMacros}</section>
+      <section class="week">${weekDates(week.start_date).map(date => {
+        const d = byDate[date], r = recipeOf(d);
+        return `<article class="day ${d?.calendar_flag || ''}"><div class="daynum">${dateNum(date)}<small>${weekday(date)}</small></div>
+          <div class="body"><h3>${esc(mealName(d) || 'Not planned')}${quickTag(r)}</h3>
+          ${r ? `<span class="small muted">${timeText(r)}</span>${macros(r)}` : ''}${d?.note ? `<p class="small">${esc(d.note)}</p>` : ''}</div></article>`;
+      }).join('')}</section>`;
+    $('#weekPick').onchange = e => { state.planWeek = Number(e.target.value); viewPlan(); };
+    return;
+  }
+
+  /* Admin: votes, requests and fairness to plan with */
+  const [votes, reqs, credits, sched] = await Promise.all([
+    q(sb.from('votes').select('*, options(name)').eq('week_id', week.id)),
+    q(sb.from('requests').select('*').eq('week_id', week.id)),
+    q(sb.from('meal_credits').select('user_id, plan_days(date)')),
+    fetchSchedule(week.start_date),
+  ]);
+  const sByDate = Object.fromEntries((sched?.days || []).map(s => [s.date, s]));
+  const top = {};
+  votes.forEach(x => { const n = x.options?.name || x.write_in; if (n) top[n] = (top[n] || 0) + 1; });
+  const topList = Object.entries(top).sort((a, b) => b[1] - a[1]).slice(0, 6);
+
+  const cutoff = ymd(new Date(Date.now() - 28 * 864e5));
+  const threeWk = ymd(new Date(Date.now() - 21 * 864e5));
+  const fairness = state.profiles.map(p => {
+    const mine = credits.filter(c => c.user_id === p.id && c.plan_days);
+    return { name:p.name, recent:mine.filter(c => c.plan_days.date >= cutoff).length, all:mine.length,
+             behind:!mine.some(c => c.plan_days.date >= threeWk) };
+  });
+  const behind = fairness.filter(f => f.behind).map(f => f.name);
+
+  const mealSelect = (date, d) => {
+    const flag = d?.calendar_flag || sByDate[date]?.flag || 'home';
+    const rs = [...recipes].sort((a, b) => flag !== 'home' ? (b.is_quick - a.is_quick) || (b.priority - a.priority) : (b.priority - a.priority));
+    const cur = d?.meal_kind === 'recipe' ? 'r' + d.recipe_id : (d?.option_id ? 'o' + d.option_id : (d?.meal_kind || ''));
+    const opt = (val, label) => `<option value="${val}" ${cur === val ? 'selected' : ''}>${esc(label)}</option>`;
+    return `<select name="meal_${date}"><option value="">Not planned</option>
+      <optgroup label="Cook at home">${rs.map(r => opt('r' + r.id, r.name + (r.is_quick && r.total_min ? ` (${r.total_min} min)` : ''))).join('')}</optgroup>
+      <optgroup label="Takeout">${options.filter(o => o.category === 'takeout').map(o => opt('o' + o.id, o.name)).join('')}</optgroup>
+      <optgroup label="Eat out">${options.filter(o => o.category === 'restaurant').map(o => opt('o' + o.id, o.name)).join('')}</optgroup>
+      <optgroup label="Other">${opt('leftovers', 'Leftovers')}${opt('fend', 'Fend for yourself')}</optgroup></select>`;
+  };
+
+  v.innerHTML = `
+    <section class="stack">${picker}
+      ${behind.length ? `<p class="notice">No pick from ${esc(behind.join(', '))} in the last 3 weeks.</p>` : ''}
+      <div class="row">
+        <div class="stack"><h3>Top picks</h3>${topList.length ? `<ul class="list small">${topList.map(([n, c]) => `<li>${esc(n)}: ${c} vote${c > 1 ? 's' : ''}</li>`).join('')}</ul>` : '<p class="muted small">No votes this week.</p>'}</div>
+        <div class="stack"><h3>Picks that made the plan</h3><div class="scroll"><table class="tally small"><tbody>
+          <tr><td></td><td class="muted">Last 4 weeks</td><td class="muted">All time</td></tr>
+          ${fairness.map(f => `<tr><td>${esc(f.name)}</td><td>${f.recent}</td><td>${f.all}</td></tr>`).join('')}</tbody></table></div></div>
+      </div>
+      ${reqs.length ? `<div class="stack"><h3>Requests</h3><ul class="list small">${reqs.map(r => `<li><b>${esc(nameOf(r.user_id))}</b>${r.day ? `, ${dayLabel(r.day)}` : ''}: ${esc(r.text)}</li>`).join('')}</ul></div>` : ''}
+      ${weekMacros}
+      ${sched?.days
+        ? `<p class="small muted">${esc(outlook(sched.days).text)}</p><div><button class="btn" type="button" id="useCal">Reset every night from the calendar</button></div>`
+        : '<p class="notice small">The family calendar didn’t load, so set each night by hand.</p>'}
+    </section>
+    <form id="planForm" class="week">
+      ${weekDates(week.start_date).map(date => {
+        const d = byDate[date], who = new Set((d?.meal_credits || []).map(c => c.user_id));
+        const s = sByDate[date], flag = d?.calendar_flag || s?.flag || 'home';
+        return `<article class="day ${flag}"><div class="daynum">${dateNum(date)}<small>${weekday(date)}</small></div>
+          <div class="body">
+            ${schedHtml(s, d)}
+            <label>Night<select name="flag_${date}" data-flag="${date}">${Object.entries(FLAGS).map(([k, l]) => `<option value="${k}" ${flag === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+            <label>Dinner${mealSelect(date, d)}</label>
+            <fieldset class="group"><legend class="small">Whose pick was this?</legend><div class="checks">
+              ${state.profiles.map(p => `<label><input type="checkbox" name="credit_${date}" value="${p.id}" ${who.has(p.id) ? 'checked' : ''}>${esc(p.name)}</label>`).join('')}</div></fieldset>
+            <label>Note<input type="text" name="note_${date}" maxlength="140" value="${esc(d?.note || '')}" placeholder="Soccer at 6, eat by 5:30"></label>
+          </div></article>`;
+      }).join('')}
+      <div class="row">
+        <button class="btn" type="submit">Save draft</button>
+        <button class="btn primary" type="button" id="finalize">${week.status === 'finalized' ? 'Save and update the family' : 'Finalize and share with the family'}</button>
+      </div>
+    </form>`;
+
+  $('#weekPick').onchange = e => { state.planWeek = Number(e.target.value); viewPlan(); };
+  $$('[data-flag]').forEach(s => s.onchange = () => { s.closest('.day').className = 'day ' + s.value; });
+  if (sched?.days) $('#useCal').onclick = () => $$('[data-flag]').forEach(sel => {
+    const s = sByDate[sel.dataset.flag];
+    if (s){ sel.value = s.flag; sel.closest('.day').className = 'day ' + s.flag; }
+  });
+
+  const save = async finalize => {
+    const f = new FormData($('#planForm'));
+    const rows = weekDates(week.start_date).map(date => {
+      const m = f.get('meal_' + date) || '';
+      const row = { week_id:week.id, date, calendar_flag:f.get('flag_' + date), note:(f.get('note_' + date) || '').trim() || null,
+                    meal_kind:null, recipe_id:null, option_id:null };
+      if (m.startsWith('r')){ row.meal_kind = 'recipe'; row.recipe_id = Number(m.slice(1)); }
+      else if (m.startsWith('o')){ const o = options.find(o => o.id === Number(m.slice(1))); row.meal_kind = o.category; row.option_id = o.id; }
+      else if (m){ row.meal_kind = m; }
+      return row;
+    });
+    const saved = await q(sb.from('plan_days').upsert(rows, { onConflict:'week_id,date' }).select());
+    await q(sb.from('meal_credits').delete().in('plan_day_id', saved.map(s => s.id)));
+    const newCredits = saved.flatMap(s => f.getAll('credit_' + s.date).map(uid => ({
+      plan_day_id:s.id, user_id:uid,
+      source: reqs.some(r => r.user_id === uid && r.day === s.date) ? 'request' : 'vote',
+    })));
+    if (newCredits.length) await q(sb.from('meal_credits').insert(newCredits));
+    if (finalize) await q(sb.from('weeks').update({ status:'finalized' }).eq('id', week.id));
+    toast(finalize ? 'Plan shared with the family.' : 'Draft saved.');
+    viewPlan();
+  };
+  $('#planForm').onsubmit = e => { e.preventDefault(); save(false); };
+  $('#finalize').onclick = () => save(true);
+}
+
+/* ===== Recipes ===== */
+async function viewRecipes(editId){
+  const v = $('#view');
+  const [recipes, options] = await Promise.all([
+    q(sb.from('recipes').select('*, recipe_ingredients(*)').order('name')),
+    q(sb.from('options').select('*').neq('category', 'dine_in').order('name')),
+  ]);
+  if (editId !== undefined) return recipeForm(recipes.find(r => r.id === editId));
+
+  const card = r => `<details class="recipe" data-name="${esc(r.name.toLowerCase())}" data-quick="${r.is_quick && r.total_min ? 1 : 0}">
+    <summary><span><b>${esc(r.name)}</b>${quickTag(r)}${r.priority ? ' <span class="tag">Favorite</span>' : ''}${r.type === 'prepackaged' ? ' <span class="tag">Store-bought</span>' : ''}</span>
+      <span class="small muted">${timeText(r)}</span></summary>
+    <div class="inner">${macros(r)}
+      ${r.store ? `<p class="small">From ${esc(r.store)}${r.cook_method ? `, ${esc(r.cook_method)}` : ''}</p>` : ''}
+      ${r.recipe_ingredients?.length ? `<ul>${r.recipe_ingredients.map(i => `<li>${esc([i.quantity, i.unit, i.ingredient].filter(x => x != null && x !== '').join(' '))}</li>`).join('')}</ul>` : ''}
+      ${r.instructions ? `<p style="white-space:pre-line">${esc(r.instructions)}</p>` : ''}
+      ${r.source_url ? `<p class="small"><a href="${esc(r.source_url)}" target="_blank" rel="noopener">Original recipe</a></p>` : ''}
+      ${isAdmin() ? `<div><button class="btn" data-edit="${r.id}">Edit</button></div>` : ''}
+    </div></details>`;
+
+  v.innerHTML = `
+    <section class="stack">
+      <div class="row" style="align-items:end">
+        <label>Search<input type="text" id="search" placeholder="Chicken, pasta, tacos…"></label>
+        <label style="flex:0 0 auto; flex-direction:row; align-items:center; gap:.4rem; font-weight:400"><input type="checkbox" id="quickOnly">Quick only</label>
+      </div>
+      ${isAdmin() ? '<div><button class="btn primary" id="addRecipe">Add a recipe or meal</button></div>' : ''}
+    </section>
+    <section class="stack" id="recipeList">${recipes.length ? recipes.map(card).join('') : '<p class="muted">No recipes yet.</p>'}</section>
+    <section class="stack"><h2>Takeout and restaurants</h2>
+      ${options.length ? `<ul class="list">${options.map(o => `<li>${esc(o.name)} <span class="tag">${o.category === 'takeout' ? 'Takeout' : 'Eat out'}</span>
+        ${isAdmin() ? `<button class="link small" data-rmopt="${o.id}">Remove</button>` : ''}</li>`).join('')}</ul>` : '<p class="muted">None saved yet.</p>'}
+      ${isAdmin() ? `<form id="optForm" class="row" style="align-items:end">
+        <label>Name<input type="text" name="name" required maxlength="80" placeholder="Skyline Chili"></label>
+        <label>Kind<select name="category"><option value="takeout">Takeout</option><option value="restaurant">Eat out</option></select></label>
+        <div style="flex:0 0 auto"><button class="btn" type="submit">Add</button></div></form>` : ''}
+    </section>`;
+
+  const filter = () => {
+    const s = $('#search').value.trim().toLowerCase(), qo = $('#quickOnly').checked;
+    $$('#recipeList .recipe').forEach(el => el.hidden = (s && !el.dataset.name.includes(s)) || (qo && el.dataset.quick !== '1'));
+  };
+  $('#search').oninput = filter; $('#quickOnly').onchange = filter;
+  if (!isAdmin()) return;
+  $('#addRecipe').onclick = () => recipeForm();
+  $$('[data-edit]').forEach(b => b.onclick = () => viewRecipes(Number(b.dataset.edit)));
+  $$('[data-rmopt]').forEach(b => b.onclick = async () => { await q(sb.from('options').delete().eq('id', b.dataset.rmopt)); viewRecipes(); });
+  $('#optForm').onsubmit = async e => {
+    e.preventDefault(); const f = new FormData(e.target);
+    await q(sb.from('options').insert({ name:f.get('name').trim(), category:f.get('category') }));
+    toast('Added.'); viewRecipes();
+  };
+}
+
+function ingRow(i = {}){
+  return `<div class="ing">
+    <input type="text" placeholder="Qty" value="${esc(i.quantity ?? '')}" data-k="quantity" inputmode="decimal">
+    <input type="text" placeholder="Unit" value="${esc(i.unit ?? '')}" data-k="unit">
+    <input type="text" class="name" placeholder="Ingredient" value="${esc(i.ingredient ?? '')}" data-k="ingredient">
+    <select data-k="section">${SECTIONS.map(s => `<option value="${s}" ${i.section === s ? 'selected' : ''}>${s[0].toUpperCase() + s.slice(1)}</option>`).join('')}</select>
+    <button type="button" class="link small" data-rm>Remove</button></div>`;
+}
+
+function recipeForm(r = {}){
+  const v = $('#view');
+  const val = k => esc(r[k] ?? '');
+  v.innerHTML = `<form id="recipeForm" class="stack">
+    <div><button type="button" class="link" id="back">Back to recipes</button></div>
+    <h2>${r.id ? 'Edit ' + esc(r.name) : 'Add a recipe or meal'}</h2>
+    <label>Name<input type="text" name="name" required maxlength="120" value="${val('name')}"></label>
+    <div class="row">
+      <label>Kind<select name="type"><option value="homemade">Homemade</option><option value="prepackaged" ${r.type === 'prepackaged' ? 'selected' : ''}>Store-bought</option></select></label>
+      <label>Store<input type="text" name="store" value="${val('store')}" placeholder="Kroger"></label>
+      <label>Cook method<input type="text" name="cook_method" value="${val('cook_method')}" placeholder="Oven"></label>
+    </div>
+    <div class="row">
+      <label>Prep minutes<input type="number" min="0" name="prep_min" value="${val('prep_min')}"></label>
+      <label>Cook minutes<input type="number" min="0" name="cook_min" value="${val('cook_min')}"></label>
+      <label>Servings<input type="number" min="1" name="servings" value="${r.servings ?? 5}"></label>
+    </div>
+    <p class="small muted">${QUICK_MINUTES} minutes or less in total marks it Quick.</p>
+    <fieldset class="group"><legend>Per serving</legend><div class="row">
+      <label>Protein (g)<input type="number" step="0.1" min="0" name="protein_g" value="${val('protein_g')}"></label>
+      <label>Carbs (g)<input type="number" step="0.1" min="0" name="carbs_g" value="${val('carbs_g')}"></label>
+      <label>Fat (g)<input type="number" step="0.1" min="0" name="fat_g" value="${val('fat_g')}"></label>
+      <label>Calories<input type="number" min="0" name="calories" value="${val('calories')}"></label>
+    </div>
+    <div class="checks">
+      <label><input type="checkbox" name="macros_estimated" ${r.macros_estimated ? 'checked' : ''}>Macros are estimated</label>
+      <label><input type="checkbox" name="time_estimated" ${r.time_estimated ? 'checked' : ''}>Time is estimated</label>
+      <label><input type="checkbox" name="priority" ${r.priority ? 'checked' : ''}>Family favorite (show first)</label>
+    </div></fieldset>
+    <fieldset class="group"><legend>Ingredients</legend>
+      <div id="ings" class="stack">${(r.recipe_ingredients?.length ? r.recipe_ingredients : [{}]).map(ingRow).join('')}</div>
+      <div><button type="button" class="btn" id="addIng">Add ingredient</button></div></fieldset>
+    <label>Steps<textarea name="instructions">${val('instructions')}</textarea></label>
+    <label>Link to the original (optional)<input type="url" name="source_url" value="${val('source_url')}"></label>
+    <div class="row">
+      <button class="btn primary" type="submit">Save recipe</button>
+      ${r.id ? '<button class="btn danger" type="button" id="delRecipe">Delete recipe</button>' : ''}
+    </div></form>`;
+
+  const wireRm = () => $$('[data-rm]').forEach(b => b.onclick = () => b.closest('.ing').remove());
+  wireRm();
+  $('#addIng').onclick = () => { $('#ings').insertAdjacentHTML('beforeend', ingRow()); wireRm(); };
+  $('#back').onclick = () => viewRecipes();
+
+  $('#recipeForm').onsubmit = async e => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    const num = k => f.get(k) === '' || f.get(k) == null ? null : Number(f.get(k));
+    const row = {
+      name:f.get('name').trim(), type:f.get('type'), store:f.get('store').trim() || null, cook_method:f.get('cook_method').trim() || null,
+      prep_min:num('prep_min'), cook_min:num('cook_min'), servings:num('servings'),
+      protein_g:num('protein_g'), carbs_g:num('carbs_g'), fat_g:num('fat_g'), calories:num('calories'),
+      macros_estimated:!!f.get('macros_estimated'), time_estimated:!!f.get('time_estimated'), priority:!!f.get('priority'),
+      instructions:f.get('instructions').trim() || null, source_url:f.get('source_url').trim() || null,
+    };
+    let id = r.id;
+    if (id){
+      await q(sb.from('recipes').update(row).eq('id', id));
+      await q(sb.from('options').update({ name:row.name }).eq('recipe_id', id));
+      await q(sb.from('recipe_ingredients').delete().eq('recipe_id', id));
+    } else {
+      id = (await q(sb.from('recipes').insert(row).select('id').single())).id;
+      await q(sb.from('options').insert({ name:row.name, category:'dine_in', recipe_id:id }));
+    }
+    const ings = $$('#ings .ing').map(el => {
+      const g = k => el.querySelector(`[data-k="${k}"]`).value.trim();
+      const qty = g('quantity');
+      return { recipe_id:id, ingredient:g('ingredient'), quantity:qty === '' || isNaN(qty) ? null : Number(qty), unit:g('unit') || null, section:g('section') };
+    }).filter(i => i.ingredient);
+    if (ings.length) await q(sb.from('recipe_ingredients').insert(ings));
+    toast('Recipe saved.');
+    viewRecipes();
+  };
+  if (r.id) $('#delRecipe').onclick = async () => {
+    if (!confirm(`Delete ${r.name}?`)) return;
+    const linked = await q(sb.from('options').select('id').eq('recipe_id', r.id));
+    const { error } = await sb.from('recipes').delete().eq('id', r.id);
+    if (error){ toast('This recipe is on a past plan, so it can’t be deleted.', true); return; }
+    if (linked.length) await q(sb.from('options').delete().in('id', linked.map(o => o.id)));
+    toast('Recipe deleted.');
+    viewRecipes();
+  };
+}
+</script>
+</body>
+</html>

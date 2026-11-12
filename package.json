@@ -1,0 +1,8 @@
+{
+  "name": "witham-dinners",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "ical.js": "2.1.0"
+  }
+}
