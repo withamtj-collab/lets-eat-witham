@@ -137,6 +137,11 @@ textarea{min-height:7rem; resize:vertical}
 .check input{width:1.3rem; height:1.3rem; margin-top:.15rem; accent-color:var(--herb); flex:none}
 .check > span{display:flex; flex-direction:column}
 .shoprow.done .check b{text-decoration:line-through; color:var(--muted); font-weight:400}
+.rating{font-size:.88rem; font-weight:700; color:var(--saffron); white-space:nowrap}
+.rate{display:flex; align-items:center; gap:.6rem; flex-wrap:wrap}
+.stars{display:inline-flex; gap:.1rem}
+.stars button{border:0; background:none; cursor:pointer; font-size:1.45rem; line-height:1; padding:.15rem .1rem; color:var(--line)}
+.stars button.on{color:var(--saffron)}
 .empty{padding:2rem 0; display:flex; flex-direction:column; gap:.8rem; align-items:flex-start}
 .login{max-width:420px; margin:12vh auto 0; padding:0 1.25rem; display:flex; flex-direction:column; gap:1.5rem}
 .notice{padding:.8rem 1rem; border-radius:12px; background:var(--saffron-soft); color:var(--ink)}
@@ -194,6 +199,31 @@ function macros(r){
 }
 const timeText = r => r?.total_min ? `${r.total_min} min${r.time_estimated ? ' (est.)' : ''}` : '';
 const quickTag = r => r?.is_quick && r?.total_min ? ' <span class="tag quick">Quick</span>' : '';
+
+/* ===== Ratings ===== */
+const loadRatings = () => sb.from('recipe_ratings').select('recipe_id, user_id, stars').then(r => r.data || []);
+function ratingSummary(rid, ratings){
+  const rs = ratings.filter(r => r.recipe_id === rid);
+  if (!rs.length) return '';
+  const avg = rs.reduce((s, r) => s + r.stars, 0) / rs.length;
+  return ` <span class="rating" aria-label="Rated ${avg.toFixed(1)} out of 5 by ${rs.length}">★ ${avg.toFixed(1)} <span class="muted">(${rs.length})</span></span>`;
+}
+function starPicker(rid, ratings){
+  const mine = ratings.find(r => r.recipe_id === rid && r.user_id === state.user.id)?.stars || 0;
+  return `<span class="stars" role="group" aria-label="Your rating">${[1,2,3,4,5].map(n =>
+    `<button type="button" data-rate="${rid}" data-stars="${n}" class="${n <= mine ? 'on' : ''}" aria-label="${n} star${n > 1 ? 's' : ''}">★</button>`).join('')}</span>`;
+}
+function wireStars(){
+  $$('[data-rate]').forEach(b => b.onclick = async e => {
+    e.preventDefault();
+    const n = Number(b.dataset.stars);
+    await q(sb.from('recipe_ratings').upsert(
+      { recipe_id:Number(b.dataset.rate), user_id:state.user.id, stars:n, updated_at:new Date().toISOString() },
+      { onConflict:'recipe_id,user_id' }));
+    b.parentElement.querySelectorAll('button').forEach(x => x.classList.toggle('on', Number(x.dataset.stars) <= n));
+    toast('Rating saved.');
+  });
+}
 
 /* ===== Family calendar (6-8 PM each night), read by the Netlify Function ===== */
 async function fetchSchedule(start){
@@ -326,11 +356,12 @@ async function viewVote(){
     if (isAdmin()) $('#newWeek').onclick = openNextWeek;
     return;
   }
-  const [options, mine, myReqs, sched] = await Promise.all([
+  const [options, mine, myReqs, sched, ratings] = await Promise.all([
     q(sb.from('options').select('*, recipes(*)').order('name')),
     q(sb.from('votes').select('*').eq('week_id', week.id).eq('user_id', state.user.id)),
     q(sb.from('requests').select('*').eq('week_id', week.id).eq('user_id', state.user.id).order('id')),
     fetchSchedule(week.start_date),
+    loadRatings(),
   ]);
   const closes = new Date(week.closes_at).toLocaleString(undefined, { weekday:'long', hour:'numeric', minute:'2-digit' });
   const look = sched?.days ? outlook(sched.days) : null;
@@ -343,7 +374,7 @@ async function viewVote(){
       .sort((a, b) => (fits(b) - fits(a)) || ((b.recipes?.priority ? 1 : 0) - (a.recipes?.priority ? 1 : 0)));
     return `<fieldset class="group"><legend>${label}</legend>
       ${opts.map(o => `<label class="choice"><input type="radio" name="${cat}" value="${o.id}" ${vote?.option_id === o.id ? 'checked' : ''}>
-        <span><b>${esc(o.name)}${quickTag(o.recipes)}${o.recipes?.priority ? ' <span class="tag">Favorite</span>' : ''}${fits(o) ? ' <span class="tag fit">Good fit this week</span>' : ''}</b>${macros(o.recipes)}</span></label>`).join('')}
+        <span><b>${esc(o.name)}${quickTag(o.recipes)}${o.recipes?.priority ? ' <span class="tag">Favorite</span>' : ''}${fits(o) ? ' <span class="tag fit">Good fit this week</span>' : ''}</b>${macros(o.recipes)}${o.recipe_id ? ratingSummary(o.recipe_id, ratings) : ''}</span></label>`).join('')}
       <label class="choice"><input type="radio" name="${cat}" value="write" ${vote?.write_in ? 'checked' : ''}>
         <span><b>Something else</b><input type="text" name="${cat}_write" maxlength="80" placeholder="Type your idea" value="${esc(vote?.write_in || '')}"></span></label>
       <label class="choice"><input type="radio" name="${cat}" value="" ${!vote ? 'checked' : ''}><span>No pick</span></label>
@@ -467,11 +498,17 @@ async function viewPlan(){
     return;
   }
   const week = weeks.find(w => w.id === state.planWeek) || weeks[0];
-  const [days, recipes, options] = await Promise.all([
+  const [days, recipes, options, ratings] = await Promise.all([
     q(sb.from('plan_days').select('*, meal_credits(user_id)').eq('week_id', week.id)),
     q(sb.from('recipes').select('*').order('name')),
     q(sb.from('options').select('*').neq('category', 'dine_in').order('name')),
+    loadRatings(),
   ]);
+  const today = ymd(new Date());
+  const avgText = rid => {
+    const rs = ratings.filter(x => x.recipe_id === rid);
+    return rs.length ? ` ★${(rs.reduce((s, x) => s + x.stars, 0) / rs.length).toFixed(1)}` : '';
+  };
   const byDate = Object.fromEntries(days.map(d => [d.date, d]));
   const recipeOf = d => recipes.find(r => r.id === d?.recipe_id);
   const mealName = d => {
@@ -497,9 +534,11 @@ async function viewPlan(){
         const d = byDate[date], r = recipeOf(d);
         return `<article class="day ${d?.calendar_flag || ''}"><div class="daynum">${dateNum(date)}<small>${weekday(date)}</small></div>
           <div class="body"><h3>${esc(mealName(d) || 'Not planned')}${quickTag(r)}</h3>
-          ${r ? `<span class="small muted">${timeText(r)}</span>${macros(r)}` : ''}${d?.note ? `<p class="small">${esc(d.note)}</p>` : ''}</div></article>`;
+          ${r ? `<span class="small muted">${timeText(r)}</span>${macros(r)}` : ''}${d?.note ? `<p class="small">${esc(d.note)}</p>` : ''}
+          ${r && date <= today ? `<div class="rate"><span class="small">How was it?</span>${starPicker(r.id, ratings)}</div>` : ''}</div></article>`;
       }).join('')}</section>`;
     $('#weekPick').onchange = e => { state.planWeek = Number(e.target.value); viewPlan(); };
+    wireStars();
     return;
   }
 
@@ -530,7 +569,7 @@ async function viewPlan(){
     const cur = d?.meal_kind === 'recipe' ? 'r' + d.recipe_id : (d?.option_id ? 'o' + d.option_id : (d?.meal_kind || ''));
     const opt = (val, label) => `<option value="${val}" ${cur === val ? 'selected' : ''}>${esc(label)}</option>`;
     return `<select name="meal_${date}"><option value="">Not planned</option>
-      <optgroup label="Cook at home">${rs.map(r => opt('r' + r.id, r.name + (r.is_quick && r.total_min ? ` (${r.total_min} min)` : ''))).join('')}</optgroup>
+      <optgroup label="Cook at home">${rs.map(r => opt('r' + r.id, r.name + (r.is_quick && r.total_min ? ` (${r.total_min} min)` : '') + avgText(r.id))).join('')}</optgroup>
       <optgroup label="Takeout">${options.filter(o => o.category === 'takeout').map(o => opt('o' + o.id, o.name)).join('')}</optgroup>
       <optgroup label="Eat out">${options.filter(o => o.category === 'restaurant').map(o => opt('o' + o.id, o.name)).join('')}</optgroup>
       <optgroup label="Other">${opt('leftovers', 'Leftovers')}${opt('fend', 'Fend for yourself')}</optgroup></select>`;
@@ -753,16 +792,17 @@ async function buildList(week, existing){
 /* ===== Recipes ===== */
 async function viewRecipes(editId){
   const v = $('#view');
-  const [recipes, options] = await Promise.all([
+  const [recipes, options, ratings] = await Promise.all([
     q(sb.from('recipes').select('*, recipe_ingredients(*)').order('name')),
     q(sb.from('options').select('*').neq('category', 'dine_in').order('name')),
+    loadRatings(),
   ]);
   if (editId !== undefined) return recipeForm(recipes.find(r => r.id === editId));
 
   const card = r => `<details class="recipe" data-name="${esc(r.name.toLowerCase())}" data-quick="${r.is_quick && r.total_min ? 1 : 0}">
-    <summary><span><b>${esc(r.name)}</b>${quickTag(r)}${r.priority ? ' <span class="tag">Favorite</span>' : ''}${r.type === 'prepackaged' ? ' <span class="tag">Store-bought</span>' : ''}</span>
+    <summary><span><b>${esc(r.name)}</b>${quickTag(r)}${r.priority ? ' <span class="tag">Favorite</span>' : ''}${r.type === 'prepackaged' ? ' <span class="tag">Store-bought</span>' : ''}${ratingSummary(r.id, ratings)}</span>
       <span class="small muted">${timeText(r)}</span></summary>
-    <div class="inner">${macros(r)}
+    <div class="inner"><div class="rate"><span class="small">Your rating</span>${starPicker(r.id, ratings)}</div>${macros(r)}
       ${r.store ? `<p class="small">From ${esc(r.store)}${r.cook_method ? `, ${esc(r.cook_method)}` : ''}</p>` : ''}
       ${r.recipe_ingredients?.length ? `<ul>${r.recipe_ingredients.map(i => `<li>${esc([i.quantity, i.unit, i.ingredient].filter(x => x != null && x !== '').join(' '))}</li>`).join('')}</ul>` : ''}
       ${r.instructions ? `<p style="white-space:pre-line">${esc(r.instructions)}</p>` : ''}
@@ -793,6 +833,7 @@ async function viewRecipes(editId){
     $$('#recipeList .recipe').forEach(el => el.hidden = (s && !el.dataset.name.includes(s)) || (qo && el.dataset.quick !== '1'));
   };
   $('#search').oninput = filter; $('#quickOnly').onchange = filter;
+  wireStars();
   if (!isAdmin()) return;
   $('#addRecipe').onclick = () => recipeForm();
   $$('[data-edit]').forEach(b => b.onclick = () => viewRecipes(Number(b.dataset.edit)));
@@ -813,12 +854,51 @@ function ingRow(i = {}){
     <button type="button" class="link small" data-rm>Remove</button></div>`;
 }
 
+// Shrink a photo to at most 1600px on its long side, as JPEG, so uploads stay small and fast.
+function shrinkPhoto(file){
+  return new Promise((resolve, reject) => {
+    const img = new Image(), url = URL.createObjectURL(file);
+    img.onload = () => {
+      const s = Math.min(1, 1600 / Math.max(img.width, img.height));
+      const c = document.createElement('canvas');
+      c.width = Math.round(img.width * s); c.height = Math.round(img.height * s);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(url);
+      resolve({ media_type:'image/jpeg', data:c.toDataURL('image/jpeg', 0.85).split(',')[1] });
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('That photo format won’t open here. Try a JPEG or PNG.')); };
+    img.src = url;
+  });
+}
+
+function fillRecipeForm(o){
+  const f = $('#recipeForm');
+  const set = (k, v) => {
+    const el = f.elements[k];
+    if (!el || v === undefined || v === null || v === '') return;
+    if (el.type === 'checkbox') el.checked = !!v; else el.value = v;
+  };
+  ['name','type','store','cook_method','prep_min','cook_min','servings','protein_g','carbs_g','fat_g','calories','instructions']
+    .forEach(k => set(k, o[k]));
+  f.elements.macros_estimated.checked = !!o.macros_estimated;
+  f.elements.time_estimated.checked = !!o.time_estimated;
+  if (Array.isArray(o.ingredients) && o.ingredients.length){
+    $('#ings').innerHTML = o.ingredients.map(ingRow).join('');
+    $$('[data-rm]').forEach(b => b.onclick = () => b.closest('.ing').remove());
+  }
+}
+
 function recipeForm(r = {}){
   const v = $('#view');
   const val = k => esc(r[k] ?? '');
   v.innerHTML = `<form id="recipeForm" class="stack">
     <div><button type="button" class="link" id="back">Back to recipes</button></div>
     <h2>${r.id ? 'Edit ' + esc(r.name) : 'Add a recipe or meal'}</h2>
+    <div class="notice stack">
+      <p class="small"><b>Fill this in from photos.</b> Snap a cookbook page, or the front and back of a store-bought meal’s box with the nutrition label showing. Up to 4 photos.</p>
+      <input type="file" id="photos" accept="image/*" multiple>
+      <p class="small" id="photoStatus" role="status"></p>
+    </div>
     <label>Name<input type="text" name="name" required maxlength="120" value="${val('name')}"></label>
     <div class="row">
       <label>Kind<select name="type"><option value="homemade">Homemade</option><option value="prepackaged" ${r.type === 'prepackaged' ? 'selected' : ''}>Store-bought</option></select></label>
@@ -856,6 +936,34 @@ function recipeForm(r = {}){
   wireRm();
   $('#addIng').onclick = () => { $('#ings').insertAdjacentHTML('beforeend', ingRow()); wireRm(); };
   $('#back').onclick = () => viewRecipes();
+
+  $('#photos').onchange = async e => {
+    const files = [...e.target.files].slice(0, 4);
+    if (!files.length) return;
+    const status = $('#photoStatus'), input = e.target;
+    status.textContent = 'Reading the photo… this takes about 10 seconds.';
+    input.disabled = true;
+    try {
+      const images = await Promise.all(files.map(shrinkPhoto));
+      const { data:{ session } } = await sb.auth.getSession();
+      const res = await fetch('/.netlify/functions/recipe-photo', {
+        method:'POST',
+        headers:{ 'content-type':'application/json', Authorization:`Bearer ${session.access_token}` },
+        body:JSON.stringify({ images }),
+      });
+      const out = await res.json().catch(() => ({ error:'The photo reader didn’t respond. Try again.' }));
+      if (!res.ok) throw new Error(out.error || 'Couldn’t read the photo.');
+      fillRecipeForm(out);
+      status.textContent = out.macros_estimated || out.time_estimated
+        ? 'Filled in. Some times or macros are estimates and are marked that way. Check everything, then save.'
+        : 'Filled in. Check everything, then save.';
+    } catch (err){
+      status.textContent = err.message || 'Couldn’t read the photo.';
+    } finally {
+      input.disabled = false;
+      input.value = '';
+    }
+  };
 
   $('#recipeForm').onsubmit = async e => {
     e.preventDefault();
