@@ -124,6 +124,19 @@ textarea{min-height:7rem; resize:vertical}
 .events{list-style:none; margin:0; padding:0; font-size:.9rem; display:flex; flex-direction:column; gap:.15rem}
 .list li.tight{border-left:4px solid var(--saffron)}
 .list li.away{border-left:4px solid var(--muted)}
+.seg{display:inline-flex; border:1.5px solid var(--line); border-radius:10px; overflow:hidden; flex:none}
+.seg button{border:0; background:var(--surface); padding:.45rem .8rem; font-weight:700; cursor:pointer; color:var(--muted)}
+.seg button.on{background:var(--herb); color:var(--herb-ink)}
+.seg.wide{display:flex}
+.seg.wide button{flex:1; padding:.65rem .8rem}
+.shoprow{display:flex; flex-wrap:wrap; align-items:center; gap:.5rem .9rem}
+.shoprow .what{display:flex; flex-direction:column; flex:1 1 200px; min-width:0}
+.shoprow.have .what b{color:var(--muted); font-weight:400}
+.shoprow .stocked{flex-direction:row; align-items:center; gap:.35rem; font-weight:400}
+.check{flex-direction:row; align-items:flex-start; gap:.7rem; font-weight:400; flex:1; cursor:pointer}
+.check input{width:1.3rem; height:1.3rem; margin-top:.15rem; accent-color:var(--herb); flex:none}
+.check > span{display:flex; flex-direction:column}
+.shoprow.done .check b{text-decoration:line-through; color:var(--muted); font-weight:400}
 .empty{padding:2rem 0; display:flex; flex-direction:column; gap:.8rem; align-items:flex-start}
 .login{max-width:420px; margin:12vh auto 0; padding:0 1.25rem; display:flex; flex-direction:column; gap:1.5rem}
 .notice{padding:.8rem 1rem; border-radius:12px; background:var(--saffron-soft); color:var(--ink)}
@@ -262,6 +275,7 @@ const TABS = [
   { id:'vote', label:'Vote' },
   { id:'plan', label:'The plan' },
   { id:'recipes', label:'Recipes' },
+  { id:'shop', label:'Shopping', admin:true },
   { id:'results', label:'Results', admin:true },
 ];
 
@@ -280,7 +294,8 @@ function renderShell(){
     <main id="view" class="view"><p class="muted">Loading…</p></main>`;
   $('#signOut').onclick = () => sb.auth.signOut();
   $$('.tabs button').forEach(b => b.onclick = () => { state.tab = b.dataset.tab; renderShell(); });
-  ({ vote:viewVote, plan:viewPlan, recipes:viewRecipes, results:viewResults })[state.tab]().catch(console.error);
+  stopLive();
+  ({ vote:viewVote, plan:viewPlan, recipes:viewRecipes, shop:viewShop, results:viewResults })[state.tab]().catch(console.error);
 }
 
 async function openWeek(){
@@ -587,6 +602,152 @@ async function viewPlan(){
   };
   $('#planForm').onsubmit = e => { e.preventDefault(); save(false); };
   $('#finalize').onclick = () => save(true);
+}
+
+/* ===== Shopping (admins) ===== */
+const SECTION_ORDER = ['produce','meat','dairy','bakery','pantry','frozen','prepared','other'];
+const SECTION_LABEL = { produce:'Produce', meat:'Meat', dairy:'Dairy', bakery:'Bakery', pantry:'Pantry', frozen:'Frozen', prepared:'Store-bought meals', other:'Other' };
+const norm = s => String(s || '').toLowerCase().trim().replace(/\s+/g, ' ');
+const fmtQty = n => n == null ? '' : String(Math.round(n * 100) / 100);
+const itemText = i => [fmtQty(i.quantity), i.unit, i.ingredient].filter(Boolean).join(' ');
+
+function stopLive(){
+  if (state.channel){ sb.removeChannel(state.channel); state.channel = null; }
+}
+function bySection(items){
+  return SECTION_ORDER.map(s => [s, items.filter(i => (SECTION_ORDER.includes(i.section) ? i.section : 'other') === s)])
+    .filter(([, list]) => list.length);
+}
+
+async function viewShop(){
+  stopLive();
+  const v = $('#view');
+  const weeks = await recentWeeks();
+  if (!weeks.length){ v.innerHTML = '<section class="empty"><h2>No weeks yet</h2><p class="muted">Open a poll and plan the week first.</p></section>'; return; }
+  const week = weeks.find(w => w.id === state.shopWeek) || weeks.find(w => w.status === 'finalized') || weeks[0];
+  state.shopWeek = week.id;
+  const items = await q(sb.from('shopping_items').select('*').eq('week_id', week.id).order('ingredient'));
+  const mode = state.shopMode || 'shop';
+  const picker = `<label>Week<select id="weekPick">${weeks.map(w => `<option value="${w.id}" ${w.id === week.id ? 'selected' : ''}>Week of ${dayLabel(w.start_date)} (${w.status})</option>`).join('')}</select></label>`;
+
+  if (!items.length){
+    v.innerHTML = `<section class="stack">${picker}</section>
+      <section class="empty"><h2>No list yet</h2><p class="muted">Pull every ingredient from this week’s home-cooked dinners, then check what’s already in the house.</p>
+      <button class="btn primary" id="build">Build the list from the plan</button></section>`;
+    $('#weekPick').onchange = e => { state.shopWeek = Number(e.target.value); viewShop(); };
+    $('#build').onclick = () => buildList(week, items);
+    return;
+  }
+
+  const need = items.filter(i => i.need);
+  const left = need.filter(i => !i.checked).length;
+  const staples = new Set((await q(sb.from('pantry_items').select('ingredient').eq('is_staple', true))).map(s => norm(s.ingredient)));
+
+  const reviewHtml = bySection(items).map(([s, list]) => `<section class="stack"><h3>${SECTION_LABEL[s]}</h3><ul class="list">
+    ${list.map(i => `<li class="shoprow ${i.need ? '' : 'have'}"><div class="what"><b>${esc(itemText(i))}</b>${i.for_meals ? `<span class="small muted">${esc(i.for_meals)}</span>` : ''}</div>
+      <div class="seg" role="group" aria-label="${esc(i.ingredient)}">
+        <button type="button" data-need="${i.id}" data-val="false" class="${i.need ? '' : 'on'}">Have it</button>
+        <button type="button" data-need="${i.id}" data-val="true" class="${i.need ? 'on' : ''}">Need it</button></div>
+      <label class="stocked small"><input type="checkbox" data-staple="${i.id}" ${staples.has(norm(i.ingredient)) ? 'checked' : ''}>Always stocked</label></li>`).join('')}
+  </ul></section>`).join('');
+
+  const shopHtml = need.length ? bySection(need).map(([s, list]) => `<section class="stack"><h3>${SECTION_LABEL[s]}</h3><ul class="list">
+    ${list.map(i => `<li class="shoprow ${i.checked ? 'done' : ''}"><label class="check"><input type="checkbox" data-check="${i.id}" ${i.checked ? 'checked' : ''}>
+      <span><b>${esc(itemText(i))}</b>${i.for_meals ? `<span class="small muted">${esc(i.for_meals)}</span>` : ''}</span></label>
+      ${i.manual ? `<button class="link small" data-del="${i.id}">Remove</button>` : ''}</li>`).join('')}
+  </ul></section>`).join('') : '<p class="muted">Nothing to buy. Everything’s marked as already in the house.</p>';
+
+  v.innerHTML = `
+    <section class="stack">${picker}
+      <div class="seg wide" role="tablist">
+        <button type="button" data-mode="review" class="${mode === 'review' ? 'on' : ''}">Check the pantry</button>
+        <button type="button" data-mode="shop" class="${mode === 'shop' ? 'on' : ''}">Shopping list (${left} left)</button></div>
+    </section>
+    ${mode === 'review'
+      ? `<p class="muted">Mark what’s already in the house. “Always stocked” items start as Have it every week.</p>${reviewHtml}
+         <div><button class="btn primary" type="button" id="toShop">Done, show the shopping list</button></div>`
+      : `${shopHtml}
+         <form id="addItem" class="row" style="align-items:end">
+           <label>Add an item<input type="text" name="ingredient" required maxlength="80" placeholder="Milk, paper towels…"></label>
+           <label style="flex:0 1 160px">Aisle<select name="section">${SECTION_ORDER.map(s => `<option value="${s}" ${s === 'other' ? 'selected' : ''}>${SECTION_LABEL[s]}</option>`).join('')}</select></label>
+           <div style="flex:0 0 auto"><button class="btn" type="submit">Add</button></div></form>`}
+    <div><button class="link small" id="rebuild">Rebuild from the plan</button></div>`;
+
+  $('#weekPick').onchange = e => { state.shopWeek = Number(e.target.value); viewShop(); };
+  $$('[data-mode]').forEach(b => b.onclick = () => { state.shopMode = b.dataset.mode; viewShop(); });
+  $('#rebuild').onclick = () => buildList(week, items);
+
+  $$('[data-need]').forEach(b => b.onclick = async () => {
+    const val = b.dataset.val === 'true';
+    b.parentElement.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
+    b.closest('.shoprow').classList.toggle('have', !val);
+    await q(sb.from('shopping_items').update({ need:val }).eq('id', b.dataset.need));
+  });
+  $$('[data-staple]').forEach(c => c.onchange = async () => {
+    const item = items.find(i => i.id === Number(c.dataset.staple));
+    await q(sb.from('pantry_items').upsert({ ingredient:norm(item.ingredient), is_staple:c.checked }, { onConflict:'ingredient' }));
+    if (c.checked) await q(sb.from('shopping_items').update({ need:false }).eq('id', item.id));
+    viewShop();
+  });
+  $$('[data-check]').forEach(c => c.onchange = async () => {
+    c.closest('.shoprow').classList.toggle('done', c.checked);
+    await q(sb.from('shopping_items').update({ checked:c.checked }).eq('id', c.dataset.check));
+  });
+  $$('[data-del]').forEach(b => b.onclick = async () => {
+    await q(sb.from('shopping_items').delete().eq('id', b.dataset.del));
+    viewShop();
+  });
+  if (mode === 'review') $('#toShop').onclick = () => { state.shopMode = 'shop'; viewShop(); };
+  else $('#addItem').onsubmit = async e => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    await q(sb.from('shopping_items').insert({ week_id:week.id, ingredient:f.get('ingredient').trim(), section:f.get('section'), manual:true, need:true }));
+    viewShop();
+  };
+
+  // Live: when the other person checks something off, refresh within a moment.
+  state.channel = sb.channel('shop-' + week.id)
+    .on('postgres_changes', { event:'*', schema:'public', table:'shopping_items', filter:`week_id=eq.${week.id}` }, () => {
+      clearTimeout(state.shopTimer);
+      state.shopTimer = setTimeout(() => { if (state.tab === 'shop') viewShop(); }, 400);
+    })
+    .subscribe();
+}
+
+async function buildList(week, existing){
+  if (existing.some(i => !i.manual) && !confirm('Rebuild the list from the plan? Items you added by hand stay; the rest is replaced and check-offs are cleared.')) return;
+  const days = await q(sb.from('plan_days').select('date, recipe_id').eq('week_id', week.id).eq('meal_kind', 'recipe'));
+  if (!days.length){ toast('There are no home-cooked dinners on this week’s plan yet.', true); return; }
+  const recipes = await q(sb.from('recipes').select('id, name, type, store, recipe_ingredients(*)').in('id', [...new Set(days.map(d => d.recipe_id))]));
+  const staples = new Set((await q(sb.from('pantry_items').select('ingredient').eq('is_staple', true))).map(s => norm(s.ingredient)));
+
+  const merged = new Map();
+  for (const d of days.sort((a, b) => a.date.localeCompare(b.date))){
+    const r = recipes.find(x => x.id === d.recipe_id);
+    if (!r) continue;
+    const meal = `${r.name}, ${parseYmd(d.date).toLocaleDateString(undefined, { weekday:'short' })}`;
+    const lines = r.type === 'prepackaged'
+      ? [{ ingredient:r.name + (r.store ? ` (${r.store})` : ''), quantity:1, unit:null, section:'prepared' }]
+      : (r.recipe_ingredients || []);
+    for (const i of lines){
+      if (!i.ingredient) continue;
+      const key = norm(i.ingredient) + '|' + norm(i.unit);
+      const m = merged.get(key) || { ingredient:i.ingredient.trim(), unit:i.unit || null, section:i.section || 'other', qty:0, hasQty:false, meals:new Set() };
+      if (i.quantity != null){ m.qty += Number(i.quantity); m.hasQty = true; }
+      m.meals.add(meal);
+      merged.set(key, m);
+    }
+  }
+  await q(sb.from('shopping_items').delete().eq('week_id', week.id).eq('manual', false));
+  const rows = [...merged.values()].map(m => ({
+    week_id:week.id, ingredient:m.ingredient, unit:m.unit, section:m.section,
+    quantity:m.hasQty ? m.qty : null, for_meals:[...m.meals].join('; '),
+    need:!staples.has(norm(m.ingredient)), checked:false, manual:false,
+  }));
+  if (rows.length) await q(sb.from('shopping_items').insert(rows));
+  toast(`List built: ${rows.length} item${rows.length === 1 ? '' : 's'}. Now mark what you already have.`);
+  state.shopMode = 'review';
+  viewShop();
 }
 
 /* ===== Recipes ===== */
