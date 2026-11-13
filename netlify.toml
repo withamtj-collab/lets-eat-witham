@@ -3,6 +3,17 @@
   functions = "netlify/functions"
 
 # The Supabase URL and publishable key are meant to be public (the browser needs them).
-# GCAL_ICS_URL stays secret and is still scanned.
+# GCAL_ICS_URL and ANTHROPIC_API_KEY stay secret and are still scanned.
 [build.environment]
   SECRETS_SCAN_OMIT_KEYS = "SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY"
+
+# Keep the app helper fresh so updates reach phones right away
+[[headers]]
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "no-cache"
+
+[[headers]]
+  for = "/manifest.webmanifest"
+  [headers.values]
+    Content-Type = "application/manifest+json"
