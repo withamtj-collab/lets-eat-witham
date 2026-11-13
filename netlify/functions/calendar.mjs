@@ -4,7 +4,7 @@
 //
 // Netlify environment variables (Site configuration → Environment variables):
 //   GCAL_ICS_URL               Google Calendar "Secret address in iCal format"
-//   SUPABASE_URL               https://xoanixovtmtmhiwohbwv.supabase.co
+//   SUPABASE_URL               https://<project-ref>.supabase.co
 //   SUPABASE_PUBLISHABLE_KEY   sb_publishable_...
 //   FAMILY_TZ (optional)       defaults to America/New_York
 
