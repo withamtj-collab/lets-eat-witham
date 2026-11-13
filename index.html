@@ -4,6 +4,15 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Witham Dinners</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" type="image/png" href="/icon-192.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Dinners">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#F6F7F3" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#121714" media="(prefers-color-scheme: dark)">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&display=swap" rel="stylesheet">
@@ -263,6 +272,36 @@ function schedHtml(s, saved){
     ${saved && saved.calendar_flag !== s.flag ? `<p class="small muted">Calendar suggests: ${FLAGS[s.flag]}</p>` : ''}</div>`;
 }
 
+/* ===== Install as an app ===== */
+let installPrompt = null;
+const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const canInstall = () => !isStandalone() && (installPrompt || isIOS());
+async function installApp(){
+  if (installPrompt){
+    installPrompt.prompt();
+    await installPrompt.userChoice;
+    installPrompt = null;
+    refreshInstall();
+  } else {
+    toast('In Safari, tap the Share button, then Add to Home Screen.');
+  }
+}
+// Show or hide the header's Install button without redrawing the page (so nothing being typed is lost)
+function refreshInstall(){
+  const who = $('.who'), btn = $('#install');
+  if (!who) return;
+  if (canInstall() && !btn){
+    who.insertAdjacentHTML('afterbegin', '<button class="link" id="install">Install app</button> · ');
+    $('#install').onclick = installApp;
+  } else if (!canInstall() && btn){
+    btn.nextSibling?.remove(); btn.remove();
+  }
+}
+addEventListener('beforeinstallprompt', e => { e.preventDefault(); installPrompt = e; refreshInstall(); });
+addEventListener('appinstalled', () => { installPrompt = null; refreshInstall(); toast('Installed. Open Dinners from your home screen.'); });
+if ('serviceWorker' in navigator) addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
+
 /* ===== Start up ===== */
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
@@ -318,11 +357,12 @@ function renderShell(){
   }
   $('#app').innerHTML = `
     <header class="top"><div class="brand">Witham dinners</div>
-      <div class="who">${esc(state.me.name)} · <button class="link" id="signOut">Sign out</button></div></header>
+      <div class="who">${canInstall() ? '<button class="link" id="install">Install app</button> · ' : ''}${esc(state.me.name)} · <button class="link" id="signOut">Sign out</button></div></header>
     <nav class="tabs">${TABS.filter(t => !t.admin || isAdmin()).map(t =>
       `<button data-tab="${t.id}" class="${state.tab === t.id ? 'on' : ''}">${t.label}</button>`).join('')}</nav>
     <main id="view" class="view"><p class="muted">Loading…</p></main>`;
   $('#signOut').onclick = () => sb.auth.signOut();
+  if (canInstall()) $('#install').onclick = installApp;
   $$('.tabs button').forEach(b => b.onclick = () => { state.tab = b.dataset.tab; renderShell(); });
   stopLive();
   ({ vote:viewVote, plan:viewPlan, recipes:viewRecipes, shop:viewShop, results:viewResults })[state.tab]().catch(console.error);
