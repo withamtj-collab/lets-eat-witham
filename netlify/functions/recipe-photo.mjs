@@ -1,6 +1,8 @@
-// Reads photos of a cookbook page or a store-bought meal's box with Claude
-// and returns the recipe fields for the admin to check before saving.
-// Called by the site as POST /.netlify/functions/recipe-photo  { images:[{media_type, data}] }
+// Uses Claude to fill in a dish for the recipe library, either from photos of a
+// cookbook page / store-bought meal box, or from just a dish name.
+// Called by the site as POST /.netlify/functions/recipe-photo
+//   { images:[{media_type, data}] }          read the photos
+//   { dish:"mashed potatoes", course:"side" } write a simple recipe for the dish
 //
 // Netlify environment variables:
 //   ANTHROPIC_API_KEY          from console.anthropic.com (keep secret)
@@ -8,6 +10,12 @@
 //   SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY   (already set for the calendar)
 
 const SECTIONS = ['produce', 'meat', 'dairy', 'bakery', 'pantry', 'frozen', 'other'];
+const MAIN_TAGS = ['chicken', 'beef', 'pork', 'turkey', 'seafood', 'vegetarian', 'pasta', 'soup', 'casserole', 'breakfast', 'sandwich', 'pizza', 'mexican', 'asian', 'grill', 'slow cooker'];
+const SIDE_TAGS = ['vegetable', 'potato', 'rice', 'grain', 'pasta', 'salad', 'bread', 'beans', 'fruit', 'soup'];
+
+const SHARED_FIELDS = `
+- course: "main" for a main dish, "side" for a side dish (vegetables, potatoes, rice, salad, bread and the like)
+- tags: 1 to 3 categories. For a main, pick from: ${MAIN_TAGS.join(', ')}. For a side, pick from: ${SIDE_TAGS.join(', ')}.`;
 
 const PROMPT = `You read photos of cookbook pages or store-bought meal packaging for a family meal planner. Return one JSON object and nothing else.
 
@@ -21,10 +29,26 @@ Fields:
 - ingredients: for a homemade recipe, a list of {quantity, unit, ingredient, section}. quantity is a number (1 1/2 becomes 1.5) or null. unit is short ("cup", "tbsp", "tsp", "lb", "oz", "clove", "can") or null. ingredient is the item name, with prep notes after it ("onion, chopped"). section is one of produce, meat, dairy, bakery, pantry, frozen, other. For a prepackaged meal, use [].
 - instructions: the steps as plain text, one step per line. For packaging, the cooking directions.
 - protein_g, carbs_g, fat_g, calories: per serving, as numbers. If a Nutrition Facts label or nutrition line is shown, use it and set macros_estimated to false. Otherwise estimate from the ingredients and servings using standard USDA values and set macros_estimated to true.
-- time_estimated, macros_estimated: true or false
+- time_estimated, macros_estimated: true or false${SHARED_FIELDS}
 
 Use null for anything not shown that can't reasonably be estimated. Don't add ingredients that aren't shown.
 If the photos show no recipe or food product, return {"error": "No recipe or meal found in the photo."}`;
+
+const DISH_PROMPT = `You write simple, everyday home recipes for a family meal planner (a family of five in the US). Given a dish name, return one JSON object and nothing else, for the most common way a home cook makes it.
+
+Fields:
+- name: the dish name, tidied up ("mashed potatoes" becomes "Mashed Potatoes")
+- type: "homemade"
+- store, cook_method: null
+- prep_min, cook_min: realistic minutes as numbers
+- servings: 5, unless the dish is normally made in another amount
+- ingredients: a list of {quantity, unit, ingredient, section} for that many servings, using US units. quantity is a number or null; unit is short ("cup", "tbsp", "tsp", "lb", "oz", "clove", "can") or null; section is one of produce, meat, dairy, bakery, pantry, frozen, other.
+- instructions: short, clear steps, one per line
+- protein_g, carbs_g, fat_g, calories: estimated per serving from standard USDA values
+- time_estimated: true; macros_estimated: true${SHARED_FIELDS}
+
+Keep it simple and family-friendly; no specialty equipment unless the dish needs it.
+If the text isn't a food dish, return {"error": "That doesn't look like a dish name."}`;
 
 const json = (body, status = 200) => new Response(JSON.stringify(body), {
   status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
@@ -36,11 +60,26 @@ export default async (req) => {
   if (!user || user.role !== 'admin') return json({ error: 'Only Mom and Dad can add recipes.' }, 403);
   if (!process.env.ANTHROPIC_API_KEY) return json({ error: 'Photo reading isn’t set up yet (missing API key).' }, 503);
 
-  let images;
-  try { ({ images } = await req.json()); } catch { return json({ error: 'Bad request' }, 400); }
-  if (!Array.isArray(images) || !images.length || images.length > 4) return json({ error: 'Send 1 to 4 photos.' }, 400);
-  const ok = images.every((i) => ['image/jpeg', 'image/png', 'image/webp'].includes(i?.media_type) && typeof i.data === 'string');
-  if (!ok) return json({ error: 'Photos must be JPEG, PNG or WebP.' }, 400);
+  let body;
+  try { body = await req.json(); } catch { return json({ error: 'Bad request' }, 400); }
+  let system, content;
+  if (typeof body?.dish === 'string'){
+    const dish = body.dish.trim().slice(0, 100);
+    if (!dish) return json({ error: 'Type a dish name.' }, 400);
+    const hint = body.course === 'side' ? ' (served as a side dish)' : body.course === 'main' ? ' (served as a main dish)' : '';
+    system = DISH_PROMPT;
+    content = [{ type: 'text', text: `Dish: ${dish}${hint}` }];
+  } else {
+    const images = body?.images;
+    if (!Array.isArray(images) || !images.length || images.length > 4) return json({ error: 'Send 1 to 4 photos.' }, 400);
+    const ok = images.every((i) => ['image/jpeg', 'image/png', 'image/webp'].includes(i?.media_type) && typeof i.data === 'string');
+    if (!ok) return json({ error: 'Photos must be JPEG, PNG or WebP.' }, 400);
+    system = PROMPT;
+    content = [
+      ...images.map((i) => ({ type: 'image', source: { type: 'base64', media_type: i.media_type, data: i.data } })),
+      { type: 'text', text: 'Read these photos and return the JSON.' },
+    ];
+  }
 
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -52,19 +91,13 @@ export default async (req) => {
     body: JSON.stringify({
       model: process.env.CLAUDE_MODEL || 'claude-haiku-5-5',
       max_tokens: 3000,
-      system: PROMPT,
-      messages: [{
-        role: 'user',
-        content: [
-          ...images.map((i) => ({ type: 'image', source: { type: 'base64', media_type: i.media_type, data: i.data } })),
-          { type: 'text', text: 'Read these photos and return the JSON.' },
-        ],
-      }],
+      system,
+      messages: [{ role: 'user', content }],
     }),
   });
   if (!res.ok) {
     console.error('Claude API error', res.status, (await res.text()).slice(0, 500));
-    return json({ error: 'Claude couldn’t read the photo right now. Try again in a minute.' }, 502);
+    return json({ error: 'Claude couldn’t help right now. Try again in a minute.' }, 502);
   }
 
   const data = await res.json();
@@ -75,7 +108,7 @@ export default async (req) => {
     if (out.error) return json({ error: String(out.error).slice(0, 200) }, 422);
     return json(sanitize(out));
   } catch {
-    return json({ error: 'Couldn’t make sense of that photo. Try a clearer, closer shot.' }, 502);
+    return json({ error: body?.dish ? 'Couldn’t write that recipe. Try again.' : 'Couldn’t make sense of that photo. Try a clearer, closer shot.' }, 502);
   }
 };
 
@@ -115,6 +148,9 @@ function sanitize(o) {
     calories: num(o.calories, true),
     macros_estimated: !!o.macros_estimated,
     instructions: str(o.instructions),
+    course: o.course === 'side' ? 'side' : 'main',
+    tags: (Array.isArray(o.tags) ? o.tags : []).map((t) => String(t).toLowerCase().trim())
+      .filter((t) => MAIN_TAGS.includes(t) || SIDE_TAGS.includes(t)).slice(0, 3),
     ingredients: (Array.isArray(o.ingredients) ? o.ingredients : []).slice(0, 60).map((i) => ({
       quantity: num(i?.quantity),
       unit: str(i?.unit, 20),
