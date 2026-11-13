@@ -151,6 +151,10 @@ textarea{min-height:7rem; resize:vertical}
 .stars{display:inline-flex; gap:.1rem}
 .stars button{border:0; background:none; cursor:pointer; font-size:1.45rem; line-height:1; padding:.15rem .1rem; color:var(--line)}
 .stars button.on{color:var(--saffron)}
+.chips{display:flex; flex-wrap:wrap; gap:.35rem}
+.chips:empty{display:none}
+.chip{display:inline-flex; align-items:center; gap:.35rem; padding:.25rem .3rem .25rem .7rem; border-radius:999px; background:var(--herb-soft); font-size:.9rem}
+.chip button{border:0; background:none; cursor:pointer; font-size:1.1rem; line-height:1; padding:.1rem .35rem; color:var(--muted)}
 .empty{padding:2rem 0; display:flex; flex-direction:column; gap:.8rem; align-items:flex-start}
 .login{max-width:420px; margin:12vh auto 0; padding:0 1.25rem; display:flex; flex-direction:column; gap:1.5rem}
 .notice{padding:.8rem 1rem; border-radius:12px; background:var(--saffron-soft); color:var(--ink)}
@@ -186,7 +190,7 @@ const FLAGS = { home:'Everyone home', tight:'Busy night (quick meal)', away:'Not
 let toastTimer;
 function toast(msg, bad){
   const t = $('#toast'); t.textContent = msg; t.className = 'show' + (bad ? ' bad' : '');
-  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.className = '', 3200);
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.className = '', Math.max(3200, msg.length * 60));
 }
 async function q(req){
   const { data, error } = await req;
@@ -410,7 +414,7 @@ async function viewVote(){
 
   const group = ([cat, label]) => {
     const vote = mine.find(x => x.category === cat);
-    const opts = options.filter(o => o.category === cat)
+    const opts = options.filter(o => o.category === cat && o.recipes?.course !== 'side')
       .sort((a, b) => (fits(b) - fits(a)) || ((b.recipes?.priority ? 1 : 0) - (a.recipes?.priority ? 1 : 0)));
     return `<fieldset class="group"><legend>${label}</legend>
       ${opts.map(o => `<label class="choice"><input type="radio" name="${cat}" value="${o.id}" ${vote?.option_id === o.id ? 'checked' : ''}>
@@ -539,7 +543,7 @@ async function viewPlan(){
   }
   const week = weeks.find(w => w.id === state.planWeek) || weeks[0];
   const [days, recipes, options, ratings] = await Promise.all([
-    q(sb.from('plan_days').select('*, meal_credits(user_id)').eq('week_id', week.id)),
+    q(sb.from('plan_days').select('*, meal_credits(user_id), plan_day_sides(recipe_id)').eq('week_id', week.id)),
     q(sb.from('recipes').select('*').order('name')),
     q(sb.from('options').select('*').neq('category', 'dine_in').order('name')),
     loadRatings(),
@@ -551,9 +555,27 @@ async function viewPlan(){
   };
   const byDate = Object.fromEntries(days.map(d => [d.date, d]));
   const recipeOf = d => recipes.find(r => r.id === d?.recipe_id);
+  const sidesOf = d => d?.meal_kind === 'recipe' ? (d.plan_day_sides || []).map(x => recipes.find(r => r.id === x.recipe_id)).filter(Boolean) : [];
+  const dishesOf = d => [recipeOf(d), ...sidesOf(d)].filter(Boolean);
+  // A night's macros = main + sides, per serving
+  const dayMacros = d => {
+    const ds = dishesOf(d).filter(r => r.protein_g != null || r.carbs_g != null || r.fat_g != null);
+    if (!ds.length) return null;
+    const sum = k => ds.reduce((t, r) => t + (Number(r[k]) || 0), 0);
+    return { protein_g:sum('protein_g'), carbs_g:sum('carbs_g'), fat_g:sum('fat_g'), calories:sum('calories') || null,
+             macros_estimated:ds.some(r => r.macros_estimated) };
+  };
+  // Dishes cook side by side, so the night takes about as long as its longest dish
+  const dayTime = d => {
+    const ts = dishesOf(d).map(r => r.total_min).filter(Boolean);
+    return ts.length ? `About ${Math.max(...ts)} min${dishesOf(d).length > 1 ? ' (longest dish)' : ''}` : '';
+  };
   const mealName = d => {
     if (!d?.meal_kind) return null;
-    if (d.meal_kind === 'recipe') return recipeOf(d)?.name;
+    if (d.meal_kind === 'recipe'){
+      const main = recipeOf(d)?.name, sides = sidesOf(d).map(r => r.name.toLowerCase());
+      return main ? main + (sides.length ? ` with ${listJoin(sides)}` : '') : null;
+    }
     if (d.meal_kind === 'leftovers') return 'Leftovers';
     if (d.meal_kind === 'fend') return 'Fend for yourself';
     const o = options.find(o => o.id === d.option_id);
@@ -562,7 +584,7 @@ async function viewPlan(){
   const dateNum = s => parseYmd(s).getDate();
   const weekday = s => parseYmd(s).toLocaleDateString(undefined, { weekday:'short' });
 
-  const homeMeals = weekDates(week.start_date).map(d => recipeOf(byDate[d])).filter(r => r && r.protein_g != null);
+  const homeMeals = weekDates(week.start_date).map(d => dayMacros(byDate[d])).filter(Boolean);
   const avg = k => Math.round(homeMeals.reduce((s, r) => s + (Number(r[k]) || 0), 0) / homeMeals.length);
   const weekMacros = homeMeals.length ? `<p class="macros">Home-cooked average: ${avg('protein_g')}g protein, ${avg('carbs_g')}g carbs, ${avg('fat_g')}g fat per serving.</p>` : '';
 
@@ -571,11 +593,11 @@ async function viewPlan(){
   if (!isAdmin()){
     v.innerHTML = `<section class="stack">${picker}${weekMacros}</section>
       <section class="week">${weekDates(week.start_date).map(date => {
-        const d = byDate[date], r = recipeOf(d);
+        const d = byDate[date], r = recipeOf(d), dishes = dishesOf(d);
         return `<article class="day ${d?.calendar_flag || ''}"><div class="daynum">${dateNum(date)}<small>${weekday(date)}</small></div>
           <div class="body"><h3>${esc(mealName(d) || 'Not planned')}${quickTag(r)}</h3>
-          ${r ? `<span class="small muted">${timeText(r)}</span>${macros(r)}` : ''}${d?.note ? `<p class="small">${esc(d.note)}</p>` : ''}
-          ${r && date <= today ? `<div class="rate"><span class="small">How was it?</span>${starPicker(r.id, ratings)}</div>` : ''}</div></article>`;
+          ${r ? `<span class="small muted">${dayTime(d)}</span>${macros(dayMacros(d))}` : ''}${d?.note ? `<p class="small">${esc(d.note)}</p>` : ''}
+          ${dishes.length && date <= today ? `<div class="stack"><span class="small">How was it?</span>${dishes.map(x => `<div class="rate"><span class="small" style="min-width:8rem">${esc(x.name)}</span>${starPicker(x.id, ratings)}</div>`).join('')}</div>` : ''}</div></article>`;
       }).join('')}</section>`;
     $('#weekPick').onchange = e => { state.planWeek = Number(e.target.value); viewPlan(); };
     wireStars();
@@ -605,7 +627,7 @@ async function viewPlan(){
 
   const mealSelect = (date, d) => {
     const flag = d?.calendar_flag || sByDate[date]?.flag || 'home';
-    const rs = [...recipes].sort((a, b) => flag !== 'home' ? (b.is_quick - a.is_quick) || (b.priority - a.priority) : (b.priority - a.priority));
+    const rs = recipes.filter(r => r.course !== 'side').sort((a, b) => flag !== 'home' ? (b.is_quick - a.is_quick) || (b.priority - a.priority) : (b.priority - a.priority));
     const cur = d?.meal_kind === 'recipe' ? 'r' + d.recipe_id : (d?.option_id ? 'o' + d.option_id : (d?.meal_kind || ''));
     const opt = (val, label) => `<option value="${val}" ${cur === val ? 'selected' : ''}>${esc(label)}</option>`;
     return `<select name="meal_${date}"><option value="">Not planned</option>
@@ -614,6 +636,14 @@ async function viewPlan(){
       <optgroup label="Eat out">${options.filter(o => o.category === 'restaurant').map(o => opt('o' + o.id, o.name)).join('')}</optgroup>
       <optgroup label="Other">${opt('leftovers', 'Leftovers')}${opt('fend', 'Fend for yourself')}</optgroup></select>`;
   };
+
+  const sideChip = r => `<span class="chip">${esc(r.name)}${r.total_min ? ` <span class="muted">${r.total_min}m</span>` : ''}<input type="hidden" value="${r.id}">
+    <button type="button" data-rmside aria-label="Remove ${esc(r.name)}">×</button></span>`;
+  const sidesPicker = (date, d) => `<div class="stack small" style="gap:.35rem"><span><b>Sides</b> <span class="muted">(for home-cooked dinners)</span></span>
+    <div class="chips" data-sides="${date}">${sidesOf(d).map(sideChip).join('')}</div>
+    <select data-addside="${date}" aria-label="Add a side"><option value="">+ Add a side</option>
+      ${recipes.filter(r => r.course === 'side').map(r => `<option value="${r.id}">${esc(r.name)}${r.total_min ? ` (${r.total_min} min)` : ''}${avgText(r.id)}</option>`).join('')}
+      <option value="new">New side… (Claude writes the recipe)</option></select></div>`;
 
   v.innerHTML = `
     <section class="stack">${picker}
@@ -639,6 +669,7 @@ async function viewPlan(){
             ${schedHtml(s, d)}
             <label>Night<select name="flag_${date}" data-flag="${date}">${Object.entries(FLAGS).map(([k, l]) => `<option value="${k}" ${flag === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
             <label>Dinner${mealSelect(date, d)}</label>
+            ${sidesPicker(date, d)}
             <fieldset class="group"><legend class="small">Whose pick was this?</legend><div class="checks">
               ${state.profiles.map(p => `<label><input type="checkbox" name="credit_${date}" value="${p.id}" ${who.has(p.id) ? 'checked' : ''}>${esc(p.name)}</label>`).join('')}</div></fieldset>
             <label>Note<input type="text" name="note_${date}" maxlength="140" value="${esc(d?.note || '')}" placeholder="Soccer at 6, eat by 5:30"></label>
@@ -652,6 +683,33 @@ async function viewPlan(){
 
   $('#weekPick').onchange = e => { state.planWeek = Number(e.target.value); viewPlan(); };
   $$('[data-flag]').forEach(s => s.onchange = () => { s.closest('.day').className = 'day ' + s.value; });
+  const wireChips = () => $$('[data-rmside]').forEach(b => b.onclick = () => b.closest('.chip').remove());
+  wireChips();
+  $$('[data-addside]').forEach(sel => sel.onchange = async () => {
+    const box = $(`[data-sides="${sel.dataset.addside}"]`);
+    let recipe;
+    if (sel.value === 'new'){
+      sel.value = '';
+      const name = (prompt('Name of the side dish, like “roasted broccoli”:') || '').trim();
+      if (!name) return;
+      sel.disabled = true;
+      toast(`Writing a recipe for ${name}…`);
+      try {
+        recipe = (await findOrCreateDish(name, 'side', recipes)).recipe;
+        if (![...sel.options].some(o => o.value === String(recipe.id)))
+          $$('[data-addside]').forEach(s => s.querySelector('option[value="new"]').insertAdjacentHTML('beforebegin', `<option value="${recipe.id}">${esc(recipe.name)}</option>`));
+        toast(`${recipe.name} added to the library.`);
+      } catch (err){ toast(err.message, true); }
+      finally { sel.disabled = false; }
+    } else if (sel.value){
+      recipe = recipes.find(r => r.id === Number(sel.value));
+      sel.value = '';
+    }
+    if (recipe && !box.querySelector(`input[value="${recipe.id}"]`)){
+      box.insertAdjacentHTML('beforeend', sideChip(recipe));
+      wireChips();
+    }
+  });
   if (sched?.days) $('#useCal').onclick = () => $$('[data-flag]').forEach(sel => {
     const s = sByDate[sel.dataset.flag];
     if (s){ sel.value = s.flag; sel.closest('.day').className = 'day ' + s.flag; }
@@ -669,6 +727,10 @@ async function viewPlan(){
       return row;
     });
     const saved = await q(sb.from('plan_days').upsert(rows, { onConflict:'week_id,date' }).select());
+    await q(sb.from('plan_day_sides').delete().in('plan_day_id', saved.map(s => s.id)));
+    const sideRows = saved.filter(s => s.meal_kind === 'recipe').flatMap(s =>
+      [...$(`[data-sides="${s.date}"]`).querySelectorAll('input')].map(i => ({ plan_day_id:s.id, recipe_id:Number(i.value) })));
+    if (sideRows.length) await q(sb.from('plan_day_sides').insert(sideRows));
     await q(sb.from('meal_credits').delete().in('plan_day_id', saved.map(s => s.id)));
     const newCredits = saved.flatMap(s => f.getAll('credit_' + s.date).map(uid => ({
       plan_day_id:s.id, user_id:uid,
@@ -795,8 +857,10 @@ async function viewShop(){
 
 async function buildList(week, existing){
   if (existing.some(i => !i.manual) && !confirm('Rebuild the list from the plan? Items you added by hand stay; the rest is replaced and check-offs are cleared.')) return;
-  const days = await q(sb.from('plan_days').select('date, recipe_id').eq('week_id', week.id).eq('meal_kind', 'recipe'));
-  if (!days.length){ toast('There are no home-cooked dinners on this week’s plan yet.', true); return; }
+  const planned = await q(sb.from('plan_days').select('date, recipe_id, plan_day_sides(recipe_id)').eq('week_id', week.id).eq('meal_kind', 'recipe'));
+  if (!planned.length){ toast('There are no home-cooked dinners on this week’s plan yet.', true); return; }
+  // One entry per dish: the main plus each side
+  const days = planned.flatMap(d => [{ date:d.date, recipe_id:d.recipe_id }, ...(d.plan_day_sides || []).map(x => ({ date:d.date, recipe_id:x.recipe_id }))]);
   const recipes = await q(sb.from('recipes').select('id, name, type, store, recipe_ingredients(*)').in('id', [...new Set(days.map(d => d.recipe_id))]));
   const staples = new Set((await q(sb.from('pantry_items').select('ingredient').eq('is_staple', true))).map(s => norm(s.ingredient)));
 
@@ -829,6 +893,51 @@ async function buildList(week, existing){
   viewShop();
 }
 
+/* ===== Dish library helpers ===== */
+const listJoin = a => a.length <= 1 ? (a[0] || '') : a.slice(0, -1).join(', ') + ' and ' + a[a.length - 1];
+
+async function askClaude(payload){
+  const { data:{ session } } = await sb.auth.getSession();
+  const res = await fetch('/.netlify/functions/recipe-photo', {
+    method:'POST',
+    headers:{ 'content-type':'application/json', Authorization:`Bearer ${session.access_token}` },
+    body:JSON.stringify(payload),
+  });
+  const out = await res.json().catch(() => ({ error:'Claude didn’t respond. Try again.' }));
+  if (!res.ok) throw new Error(out.error || 'Claude couldn’t help right now.');
+  return out;
+}
+
+// Saves a dish Claude filled in. Main dishes also become vote options; sides don't.
+async function saveNewDish(o, extra = {}){
+  const row = {
+    name:o.name, type:o.type || 'homemade', store:o.store || null, cook_method:o.cook_method || null,
+    prep_min:o.prep_min, cook_min:o.cook_min, servings:o.servings || 5,
+    protein_g:o.protein_g, carbs_g:o.carbs_g, fat_g:o.fat_g, calories:o.calories,
+    macros_estimated:!!o.macros_estimated, time_estimated:!!o.time_estimated,
+    instructions:o.instructions || null, course:o.course === 'side' ? 'side' : 'main', tags:o.tags || [], ...extra,
+  };
+  const saved = await q(sb.from('recipes').insert(row).select('*').single());
+  const ings = (o.ingredients || []).filter(i => i.ingredient).map(i => ({
+    recipe_id:saved.id, ingredient:i.ingredient, quantity:i.quantity, unit:i.unit, section:i.section || 'other' }));
+  if (ings.length) await q(sb.from('recipe_ingredients').insert(ings));
+  if (saved.course === 'main') await q(sb.from('options').insert({ name:saved.name, category:'dine_in', recipe_id:saved.id }));
+  return saved;
+}
+
+// Finds a dish in the library by name, or has Claude write it and saves it there.
+async function findOrCreateDish(name, course, library){
+  const hit = library.find(r => norm(r.name) === norm(name));
+  if (hit) return { recipe:hit, created:false };
+  const out = await askClaude({ dish:name, course:course || undefined });
+  const same = library.find(r => norm(r.name) === norm(out.name));
+  if (same) return { recipe:same, created:false };
+  if (course) out.course = course;
+  const recipe = await saveNewDish(out, { ai_generated:true });
+  library.push(recipe);
+  return { recipe, created:true };
+}
+
 /* ===== Recipes ===== */
 async function viewRecipes(editId){
   const v = $('#view');
@@ -839,10 +948,12 @@ async function viewRecipes(editId){
   ]);
   if (editId !== undefined) return recipeForm(recipes.find(r => r.id === editId));
 
-  const card = r => `<details class="recipe" data-name="${esc(r.name.toLowerCase())}" data-quick="${r.is_quick && r.total_min ? 1 : 0}">
-    <summary><span><b>${esc(r.name)}</b>${quickTag(r)}${r.priority ? ' <span class="tag">Favorite</span>' : ''}${r.type === 'prepackaged' ? ' <span class="tag">Store-bought</span>' : ''}${ratingSummary(r.id, ratings)}</span>
+  const card = r => `<details class="recipe" data-name="${esc((r.name + ' ' + (r.tags || []).join(' ')).toLowerCase())}" data-quick="${r.is_quick && r.total_min ? 1 : 0}" data-course="${r.course || 'main'}">
+    <summary><span><b>${esc(r.name)}</b>${r.course === 'side' ? ' <span class="tag">Side</span>' : ''}${quickTag(r)}${r.priority ? ' <span class="tag">Favorite</span>' : ''}${r.type === 'prepackaged' ? ' <span class="tag">Store-bought</span>' : ''}${r.ai_generated ? ' <span class="tag fit">Claude’s recipe</span>' : ''}${ratingSummary(r.id, ratings)}</span>
       <span class="small muted">${timeText(r)}</span></summary>
     <div class="inner"><div class="rate"><span class="small">Your rating</span>${starPicker(r.id, ratings)}</div>${macros(r)}
+      ${(r.tags || []).length ? `<p class="small muted">${esc(r.tags.join(', '))}</p>` : ''}
+      ${r.ai_generated ? '<p class="small muted">Claude wrote this recipe. Look it over, and save it from Edit once it matches how you make it.</p>' : ''}
       ${r.store ? `<p class="small">From ${esc(r.store)}${r.cook_method ? `, ${esc(r.cook_method)}` : ''}</p>` : ''}
       ${r.recipe_ingredients?.length ? `<ul>${r.recipe_ingredients.map(i => `<li>${esc([i.quantity, i.unit, i.ingredient].filter(x => x != null && x !== '').join(' '))}</li>`).join('')}</ul>` : ''}
       ${r.instructions ? `<p style="white-space:pre-line">${esc(r.instructions)}</p>` : ''}
@@ -853,10 +964,20 @@ async function viewRecipes(editId){
   v.innerHTML = `
     <section class="stack">
       <div class="row" style="align-items:end">
-        <label>Search<input type="text" id="search" placeholder="Chicken, pasta, tacos…"></label>
+        <label>Search<input type="text" id="search" placeholder="Chicken, pasta, potato…"></label>
+        <label style="flex:0 1 160px">Show<select id="courseFilter"><option value="">All dishes</option><option value="main">Main dishes</option><option value="side">Sides</option></select></label>
         <label style="flex:0 0 auto; flex-direction:row; align-items:center; gap:.4rem; font-weight:400"><input type="checkbox" id="quickOnly">Quick only</label>
       </div>
-      ${isAdmin() ? '<div><button class="btn primary" id="addRecipe">Add a recipe or meal</button></div>' : ''}
+      ${isAdmin() ? `<form id="quickAdd" class="notice stack">
+        <p class="small"><b>Add dishes by name.</b> Separate them with commas, like “Meatloaf, mashed potatoes, corn.” Anything not already in the library gets a recipe from Claude, with ingredients, time and macros, and is saved for next time.</p>
+        <div class="row" style="align-items:end">
+          <label>Dishes<input type="text" name="dishes" required maxlength="300" placeholder="Meatloaf, mashed potatoes, corn"></label>
+          <label style="flex:0 1 170px">They are<select name="course"><option value="">Claude decides</option><option value="main">Main dishes</option><option value="side">Sides</option></select></label>
+          <div style="flex:0 0 auto"><button class="btn primary" type="submit">Add to library</button></div>
+        </div>
+        <p class="small" id="quickStatus" role="status"></p>
+      </form>
+      <div><button class="btn" id="addRecipe">Add a dish with full details</button></div>` : ''}
     </section>
     <section class="stack" id="recipeList">${recipes.length ? recipes.map(card).join('') : '<p class="muted">No recipes yet.</p>'}</section>
     <section class="stack"><h2>Takeout and restaurants</h2>
@@ -869,13 +990,30 @@ async function viewRecipes(editId){
     </section>`;
 
   const filter = () => {
-    const s = $('#search').value.trim().toLowerCase(), qo = $('#quickOnly').checked;
-    $$('#recipeList .recipe').forEach(el => el.hidden = (s && !el.dataset.name.includes(s)) || (qo && el.dataset.quick !== '1'));
+    const s = $('#search').value.trim().toLowerCase(), qo = $('#quickOnly').checked, c = $('#courseFilter').value;
+    $$('#recipeList .recipe').forEach(el => el.hidden = (s && !el.dataset.name.includes(s)) || (qo && el.dataset.quick !== '1') || (c && el.dataset.course !== c));
   };
-  $('#search').oninput = filter; $('#quickOnly').onchange = filter;
+  $('#search').oninput = filter; $('#quickOnly').onchange = filter; $('#courseFilter').onchange = filter;
   wireStars();
   if (!isAdmin()) return;
   $('#addRecipe').onclick = () => recipeForm();
+  $('#quickAdd').onsubmit = async e => {
+    e.preventDefault();
+    const f = new FormData(e.target), status = $('#quickStatus'), btn = e.target.querySelector('button');
+    const names = [...new Set(f.get('dishes').split(/[,\n]/).map(x => x.trim()).filter(Boolean))].slice(0, 10);
+    const added = [], had = [], failed = [];
+    btn.disabled = true;
+    for (const [i, name] of names.entries()){
+      status.textContent = `Working on ${name} (${i + 1} of ${names.length})…`;
+      try {
+        const { recipe, created } = await findOrCreateDish(name, f.get('course'), recipes);
+        (created ? added : had).push(recipe.name + (created ? ` (${recipe.course === 'side' ? 'side' : 'main'})` : ''));
+      } catch (err){ failed.push(name); }
+    }
+    btn.disabled = false;
+    toast([added.length && `Added ${listJoin(added)}.`, had.length && `Already in the library: ${listJoin(had)}.`, failed.length && `Couldn’t add ${listJoin(failed)}.`].filter(Boolean).join(' '), failed.length > 0);
+    viewRecipes();
+  };
   $$('[data-edit]').forEach(b => b.onclick = () => viewRecipes(Number(b.dataset.edit)));
   $$('[data-rmopt]').forEach(b => b.onclick = async () => { await q(sb.from('options').delete().eq('id', b.dataset.rmopt)); viewRecipes(); });
   $('#optForm').onsubmit = async e => {
@@ -922,6 +1060,8 @@ function fillRecipeForm(o){
     .forEach(k => set(k, o[k]));
   f.elements.macros_estimated.checked = !!o.macros_estimated;
   f.elements.time_estimated.checked = !!o.time_estimated;
+  if (o.course) f.elements.course.value = o.course === 'side' ? 'side' : 'main';
+  if (Array.isArray(o.tags) && o.tags.length) f.elements.tags.value = o.tags.join(', ');
   if (Array.isArray(o.ingredients) && o.ingredients.length){
     $('#ings').innerHTML = o.ingredients.map(ingRow).join('');
     $$('[data-rm]').forEach(b => b.onclick = () => b.closest('.ing').remove());
@@ -933,13 +1073,21 @@ function recipeForm(r = {}){
   const val = k => esc(r[k] ?? '');
   v.innerHTML = `<form id="recipeForm" class="stack">
     <div><button type="button" class="link" id="back">Back to recipes</button></div>
-    <h2>${r.id ? 'Edit ' + esc(r.name) : 'Add a recipe or meal'}</h2>
+    <h2>${r.id ? 'Edit ' + esc(r.name) : 'Add a dish'}</h2>
     <div class="notice stack">
       <p class="small"><b>Fill this in from photos.</b> Snap a cookbook page, or the front and back of a store-bought meal’s box with the nutrition label showing. Up to 4 photos.</p>
       <input type="file" id="photos" accept="image/*" multiple>
       <p class="small" id="photoStatus" role="status"></p>
     </div>
     <label>Name<input type="text" name="name" required maxlength="120" value="${val('name')}"></label>
+    <div class="row" style="align-items:center">
+      <div style="flex:0 0 auto"><button type="button" class="btn" id="aiFill">Fill in the rest with Claude</button></div>
+      <p class="small muted" id="aiStatus" role="status" style="flex:1 1 200px">Type the dish name first. Claude writes a simple recipe with ingredients, time and macros.</p>
+    </div>
+    <div class="row">
+      <label>Course<select name="course"><option value="main">Main dish</option><option value="side" ${r.course === 'side' ? 'selected' : ''}>Side</option></select></label>
+      <label>Categories<input type="text" name="tags" value="${esc((r.tags || []).join(', '))}" placeholder="beef, casserole"></label>
+    </div>
     <div class="row">
       <label>Kind<select name="type"><option value="homemade">Homemade</option><option value="prepackaged" ${r.type === 'prepackaged' ? 'selected' : ''}>Store-bought</option></select></label>
       <label>Store<input type="text" name="store" value="${val('store')}" placeholder="Kroger"></label>
@@ -976,6 +1124,20 @@ function recipeForm(r = {}){
   wireRm();
   $('#addIng').onclick = () => { $('#ings').insertAdjacentHTML('beforeend', ingRow()); wireRm(); };
   $('#back').onclick = () => viewRecipes();
+  let claudeWrote = false;
+
+  $('#aiFill').onclick = async () => {
+    const f = $('#recipeForm'), name = f.elements.name.value.trim(), status = $('#aiStatus'), btn = $('#aiFill');
+    if (!name){ status.textContent = 'Type the dish name first.'; f.elements.name.focus(); return; }
+    btn.disabled = true;
+    status.textContent = `Writing a recipe for ${name}… about 10 seconds.`;
+    try {
+      fillRecipeForm(await askClaude({ dish:name, course:f.elements.course.value }));
+      claudeWrote = true;
+      status.textContent = 'Filled in. Adjust anything to match how you make it, then save.';
+    } catch (err){ status.textContent = err.message; }
+    finally { btn.disabled = false; }
+  };
 
   $('#photos').onchange = async e => {
     const files = [...e.target.files].slice(0, 4);
@@ -985,14 +1147,7 @@ function recipeForm(r = {}){
     input.disabled = true;
     try {
       const images = await Promise.all(files.map(shrinkPhoto));
-      const { data:{ session } } = await sb.auth.getSession();
-      const res = await fetch('/.netlify/functions/recipe-photo', {
-        method:'POST',
-        headers:{ 'content-type':'application/json', Authorization:`Bearer ${session.access_token}` },
-        body:JSON.stringify({ images }),
-      });
-      const out = await res.json().catch(() => ({ error:'The photo reader didn’t respond. Try again.' }));
-      if (!res.ok) throw new Error(out.error || 'Couldn’t read the photo.');
+      const out = await askClaude({ images });
       fillRecipeForm(out);
       status.textContent = out.macros_estimated || out.time_estimated
         ? 'Filled in. Some times or macros are estimates and are marked that way. Check everything, then save.'
@@ -1015,16 +1170,22 @@ function recipeForm(r = {}){
       protein_g:num('protein_g'), carbs_g:num('carbs_g'), fat_g:num('fat_g'), calories:num('calories'),
       macros_estimated:!!f.get('macros_estimated'), time_estimated:!!f.get('time_estimated'), priority:!!f.get('priority'),
       instructions:f.get('instructions').trim() || null, source_url:f.get('source_url').trim() || null,
+      course:f.get('course') === 'side' ? 'side' : 'main',
+      tags:f.get('tags').split(',').map(t => t.trim().toLowerCase()).filter(Boolean).slice(0, 5),
+      ai_generated:claudeWrote,   // saving by hand counts as reviewed
     };
     let id = r.id;
     if (id){
       await q(sb.from('recipes').update(row).eq('id', id));
-      await q(sb.from('options').update({ name:row.name }).eq('recipe_id', id));
       await q(sb.from('recipe_ingredients').delete().eq('recipe_id', id));
     } else {
       id = (await q(sb.from('recipes').insert(row).select('id').single())).id;
-      await q(sb.from('options').insert({ name:row.name, category:'dine_in', recipe_id:id }));
     }
+    // Main dishes are vote options; sides aren't.
+    const linked = await q(sb.from('options').select('id').eq('recipe_id', id));
+    if (row.course === 'main' && !linked.length) await q(sb.from('options').insert({ name:row.name, category:'dine_in', recipe_id:id }));
+    else if (row.course === 'main') await q(sb.from('options').update({ name:row.name }).eq('recipe_id', id));
+    else if (linked.length) await q(sb.from('options').delete().eq('recipe_id', id));
     const ings = $$('#ings .ing').map(el => {
       const g = k => el.querySelector(`[data-k="${k}"]`).value.trim();
       const qty = g('quantity');
